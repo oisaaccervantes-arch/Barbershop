@@ -20,7 +20,7 @@ body {
   font-family: "Work Sans", Arial, sans-serif;
 }
 
-button, input, select { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 
 .material-symbols-outlined {
@@ -182,14 +182,21 @@ label {
   font-weight: 700;
 }
 
-input, select {
+input, select, textarea {
   width: 100%;
-  height: 42px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: white;
   color: var(--ink);
   padding: 0 12px;
+}
+
+input, select { height: 42px; }
+
+textarea {
+  min-height: 88px;
+  padding-top: 10px;
+  resize: vertical;
 }
 
 .form-grid {

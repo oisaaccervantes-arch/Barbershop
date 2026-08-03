@@ -39,6 +39,10 @@
         <span class="material-symbols-outlined"></span>
         Barberos
       </button>
+      <button class="nav-item" data-view="customers">
+        <span class="material-symbols-outlined"></span>
+        Clientes
+      </button>
       <button class="nav-item" data-view="shift">
         <span class="material-symbols-outlined"></span>
         Corte de turno
@@ -82,11 +86,13 @@
             </button>
           </div>
 
-          <label>Cliente
-            <input name="customer" placeholder="Nombre del cliente" required>
+          <label>Teléfono celular
+            <input name="phone" list="customerPhoneOptions" inputmode="numeric" maxlength="10"
+              pattern="[0-9]{10}" title="Ingresa exactamente 10 dígitos"
+              placeholder="10 dígitos" required>
           </label>
-          <label>Telefono
-            <input name="phone" placeholder="Opcional">
+          <label>Cliente
+            <input name="customer" placeholder="Se completa si el teléfono ya existe" required>
           </label>
           <div class="form-grid">
             <label>Fecha
@@ -157,8 +163,13 @@
               <span class="material-symbols-outlined">delete</span>
             </button>
           </div>
+          <label>Teléfono del cliente
+            <input name="phone" list="customerPhoneOptions" inputmode="numeric" maxlength="10"
+              pattern="[0-9]{10}" title="Ingresa exactamente 10 dígitos"
+              placeholder="Vacío para público general">
+          </label>
           <label>Cliente
-            <input name="customer" placeholder="Publico general">
+            <input name="customer" placeholder="Se completa si el teléfono ya existe">
           </label>
           <label>Barbero
             <select name="barber" required></select>
@@ -261,6 +272,48 @@
       </div>
     </section>
 
+    <section class="view" id="customers">
+      <div class="workspace two-columns">
+        <form class="panel form-panel" id="customerForm">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Directorio</p>
+              <h3 id="customerFormTitle">Agregar cliente</h3>
+            </div>
+          </div>
+          <input name="customerId" type="hidden">
+          <label>Teléfono
+            <input name="phone" inputmode="numeric" maxlength="10" pattern="[0-9]{10}"
+              title="Ingresa exactamente 10 dígitos" placeholder="10 dígitos" required>
+          </label>
+          <label>Nombre
+            <input name="name" placeholder="Nombre del cliente" required>
+          </label>
+          <label>Notas
+            <textarea name="notes" maxlength="500" placeholder="Preferencias u observaciones"></textarea>
+          </label>
+          <button class="submit-button" type="submit">
+            <span class="material-symbols-outlined">add</span>
+            <span id="customerSubmitLabel">Agregar</span>
+          </button>
+          <button class="secondary-button hidden" id="cancelCustomerEdit" type="button">
+            Cancelar edición
+          </button>
+        </form>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Clientes</p>
+              <h3>Directorio de clientes</h3>
+            </div>
+            <input class="search" id="customerSearch" placeholder="Buscar nombre o teléfono">
+          </div>
+          <div class="price-list" id="customerList"></div>
+        </div>
+      </div>
+    </section>
+
     <section class="view" id="shift">
       <div class="workspace">
         <div class="panel">
@@ -296,6 +349,7 @@
   </main>
 
   <div class="toast" id="toast"></div>
+  <datalist id="customerPhoneOptions"></datalist>
   <script src="app.js"></script>
 </body>
 </html>

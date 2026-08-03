@@ -33,6 +33,7 @@ const defaultState = {
 
   ],
   barbers: ["Peke", "Alfonso", "Manos puercas"],
+  customers: [],
   appointments: [],
   sales: []
 };
@@ -41,6 +42,7 @@ let state = loadState();
 let cart = [];
 let catalogServices = [];
 let catalogBarbers = [];
+let catalogCustomers = [];
 
 const moneyFormatter = new Intl.NumberFormat("es-MX", {
   style: "currency",
@@ -51,6 +53,12 @@ const moneyFormatter = new Intl.NumberFormat("es-MX", {
 const money = value => moneyFormatter.format(Number(value));
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const nowTime = () => new Date().toTimeString().slice(0, 5);
+const escapeHtml = value => String(value)
+  .replaceAll("&", "&amp;")
+  .replaceAll("<", "&lt;")
+  .replaceAll(">", "&gt;")
+  .replaceAll('"', "&quot;")
+  .replaceAll("'", "&#039;");
 
 function loadState() {
   const saved = localStorage.getItem(STORE_KEY);
@@ -94,6 +102,75 @@ async function loadBarbersFromApi() {
   saveState();
 }
 
+async function loadCustomersFromApi() {
+  const response = await fetch(`${API_BASE_URL}/customers`);
+  if (!response.ok) throw new Error("No fue posible consultar los clientes");
+
+  catalogCustomers = (await response.json()).map(customer => ({
+    id: String(customer.id),
+    name: customer.name,
+    phone: customer.phone || "",
+    notes: customer.notes || "",
+    active: customer.active
+  }));
+  state.customers = catalogCustomers.filter(customer => customer.active);
+  saveState();
+}
+
+async function ensureCustomer(name, phone) {
+  const normalizedName = name.trim();
+  const normalizedPhone = phone.trim();
+  if (!normalizedName && !normalizedPhone) return null;
+  if (normalizedPhone.length !== 10) {
+    throw new Error("El teléfono debe tener 10 dígitos");
+  }
+
+  const existingCustomer = catalogCustomers.find(
+    customer => customer.phone === normalizedPhone
+  );
+  if (existingCustomer) {
+    if (!existingCustomer.active) {
+      const response = await fetch(
+        `${API_BASE_URL}/customers/${existingCustomer.id}/status`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ active: true })
+        }
+      );
+      if (!response.ok) throw new Error("No fue posible reactivar al cliente");
+      await loadCustomersFromApi();
+      return catalogCustomers.find(customer => customer.id === existingCustomer.id);
+    }
+    return existingCustomer;
+  }
+  if (!normalizedName) {
+    throw new Error("Captura el nombre del cliente nuevo");
+  }
+
+  const response = await fetch(`${API_BASE_URL}/customers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: normalizedName,
+      phone: normalizedPhone || null,
+      notes: null,
+      active: true
+    })
+  });
+  if (!response.ok) throw new Error("No fue posible registrar al cliente");
+
+  const customer = await response.json();
+  await loadCustomersFromApi();
+  return {
+    id: String(customer.id),
+    name: customer.name,
+    phone: customer.phone || "",
+    notes: customer.notes || "",
+    active: customer.active
+  };
+}
+
 function resetServiceForm() {
   const form = $("#serviceForm");
   form.reset();
@@ -110,6 +187,35 @@ function resetBarberForm() {
   $("#barberFormTitle").textContent = "Agregar barbero";
   $("#barberSubmitLabel").textContent = "Agregar";
   $("#cancelBarberEdit").classList.add("hidden");
+}
+
+function resetCustomerForm() {
+  const form = $("#customerForm");
+  form.reset();
+  form.customerId.value = "";
+  $("#customerFormTitle").textContent = "Agregar cliente";
+  $("#customerSubmitLabel").textContent = "Agregar";
+  $("#cancelCustomerEdit").classList.add("hidden");
+}
+
+function autofillCustomerByPhone(form) {
+  const phone = form.phone.value;
+  const customer = phone.length === 10
+    ? catalogCustomers.find(item => item.active && item.phone === phone)
+    : null;
+
+  if (customer) {
+    form.customer.value = customer.name;
+    form.customer.readOnly = true;
+    form.customer.dataset.customerId = customer.id;
+    showToast("Cliente encontrado");
+  } else {
+    if (form.customer.dataset.customerId) {
+      form.customer.value = "";
+      delete form.customer.dataset.customerId;
+    }
+    form.customer.readOnly = false;
+  }
 }
 
 function $(selector) {
@@ -132,6 +238,12 @@ function renderSelects() {
     .map(service => `<option value="${service.id}">${service.name} - ${money(service.price)}</option>`)
     .join("");
   $('select[name="serviceId"]').innerHTML = serviceOptions;
+
+  $("#customerPhoneOptions").innerHTML = (state.customers || [])
+    .map(customer =>
+      `<option value="${escapeHtml(customer.phone)}">${escapeHtml(customer.name)}</option>`
+    )
+    .join("");
 }
 
 function renderShell() {
@@ -221,6 +333,29 @@ function renderBarbers() {
   `).join("");
 }
 
+function renderCustomers() {
+  const query = ($("#customerSearch")?.value || "").trim().toLowerCase();
+  const customers = catalogCustomers.filter(customer =>
+    `${customer.name} ${customer.phone}`.toLowerCase().includes(query)
+  );
+
+  $("#customerList").innerHTML = customers.map(customer => `
+    <div class="price-item ${customer.active ? "" : "inactive"}">
+      <div>
+        <strong>${escapeHtml(customer.name)}</strong>
+        <span>${escapeHtml(customer.phone || "Sin teléfono")} · ${customer.active ? "Activo" : "Inactivo"}</span>
+      </div>
+      <div class="catalog-actions">
+        <button class="chip-button" type="button" data-edit-customer="${customer.id}">Editar</button>
+        <button class="chip-button ${customer.active ? "danger" : "pay"}" type="button"
+          data-toggle-customer="${customer.id}">
+          ${customer.active ? "Desactivar" : "Activar"}
+        </button>
+      </div>
+    </div>
+  `).join("") || `<div class="cart-empty">No hay clientes registrados.</div>`;
+}
+
 function renderCart() {
   if (!cart.length) {
     $("#cartItems").innerHTML = `<div class="cart-empty">Selecciona servicios para cobrar.</div>`;
@@ -272,6 +407,7 @@ function renderAll() {
   renderAppointments();
   renderServices();
   renderBarbers();
+  renderCustomers();
   renderCart();
   renderShift();
 }
@@ -412,6 +548,44 @@ document.addEventListener("click", async event => {
     }
   }
 
+  const editCustomer = event.target.closest("[data-edit-customer]");
+  if (editCustomer) {
+    const customer = catalogCustomers.find(item => item.id === editCustomer.dataset.editCustomer);
+    if (customer) {
+      const form = $("#customerForm");
+      form.customerId.value = customer.id;
+      form.name.value = customer.name;
+      form.phone.value = customer.phone;
+      form.notes.value = customer.notes;
+      $("#customerFormTitle").textContent = "Editar cliente";
+      $("#customerSubmitLabel").textContent = "Guardar cambios";
+      $("#cancelCustomerEdit").classList.remove("hidden");
+      form.name.focus();
+    }
+  }
+
+  const toggleCustomer = event.target.closest("[data-toggle-customer]");
+  if (toggleCustomer) {
+    const customer = catalogCustomers.find(item => item.id === toggleCustomer.dataset.toggleCustomer);
+    if (!customer) return;
+    if (customer.active && !window.confirm(`¿Desactivar a "${customer.name}"?`)) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/customers/${customer.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: !customer.active })
+      });
+      if (!response.ok) throw new Error("No fue posible cambiar el estado");
+      await loadCustomersFromApi();
+      renderAll();
+      showToast(customer.active ? "Cliente desactivado" : "Cliente activado");
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudo actualizar el cliente");
+    }
+  }
+
   const action = event.target.closest("[data-action]");
   if (action) {
     const appointment = state.appointments.find(item => item.id === action.dataset.id);
@@ -420,6 +594,8 @@ document.addEventListener("click", async event => {
     if (action.dataset.action === "charge") {
       cart = [{ id: appointment.serviceId, name: appointment.serviceName, price: appointment.price }];
       $("#saleForm").customer.value = appointment.customer;
+      $("#saleForm").phone.value = appointment.phone || "";
+      $("#saleForm").customer.readOnly = Boolean(appointment.customerId);
       $("#saleForm").barber.value = appointment.barber;
       appointment.status = "atendida";
       switchView("cashier");
@@ -435,29 +611,46 @@ $("#clearCart").addEventListener("click", () => { cart = []; renderCart(); });
 $("#printShift").addEventListener("click", () => printBlock(shiftTicket()));
 $("#cancelServiceEdit").addEventListener("click", resetServiceForm);
 $("#cancelBarberEdit").addEventListener("click", resetBarberForm);
+$("#cancelCustomerEdit").addEventListener("click", resetCustomerForm);
+$("#customerSearch").addEventListener("input", renderCustomers);
+$("#appointmentForm").phone.addEventListener("input", () =>
+  autofillCustomerByPhone($("#appointmentForm"))
+);
+$("#saleForm").phone.addEventListener("input", () =>
+  autofillCustomerByPhone($("#saleForm"))
+);
 
-$("#appointmentForm").addEventListener("submit", event => {
+$("#appointmentForm").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.currentTarget;
   const service = state.services.find(item => item.id === form.serviceId.value);
-  state.appointments.push({
-    id: crypto.randomUUID(),
-    customer: form.customer.value.trim(),
-    phone: form.phone.value.trim(),
-    date: form.date.value,
-    time: form.time.value,
-    barber: form.barber.value,
-    serviceId: service.id,
-    serviceName: service.name,
-    price: service.price,
-    status: "pendiente"
-  });
-  form.reset();
-  form.date.value = todayISO();
-  form.time.value = nowTime();
-  saveState();
-  renderAll();
-  showToast("Cita guardada");
+  try {
+    const customer = await ensureCustomer(form.customer.value, form.phone.value);
+    state.appointments.push({
+      id: crypto.randomUUID(),
+      customerId: customer?.id || null,
+      customer: form.customer.value.trim(),
+      phone: form.phone.value.trim(),
+      date: form.date.value,
+      time: form.time.value,
+      barber: form.barber.value,
+      serviceId: service.id,
+      serviceName: service.name,
+      price: service.price,
+      status: "pendiente"
+    });
+    form.reset();
+    form.customer.readOnly = false;
+    delete form.customer.dataset.customerId;
+    form.date.value = todayISO();
+    form.time.value = nowTime();
+    saveState();
+    renderAll();
+    showToast("Cita y cliente guardados");
+  } catch (error) {
+    console.error(error);
+    showToast("No se pudo registrar la cita");
+  }
 });
 
 $("#serviceForm").addEventListener("submit", async event => {
@@ -526,7 +719,41 @@ $("#barberForm").addEventListener("submit", async event => {
   }
 });
 
-$("#saleForm").addEventListener("submit", event => {
+$("#customerForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const customerId = form.customerId.value;
+  const currentCustomer = catalogCustomers.find(item => item.id === customerId);
+
+  try {
+    const response = await fetch(
+      customerId
+        ? `${API_BASE_URL}/customers/${customerId}`
+        : `${API_BASE_URL}/customers`,
+      {
+        method: customerId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name.value.trim(),
+          phone: form.phone.value.trim() || null,
+          notes: form.notes.value.trim() || null,
+          active: currentCustomer?.active ?? true
+        })
+      }
+    );
+    if (!response.ok) throw new Error("No fue posible guardar el cliente");
+
+    resetCustomerForm();
+    await loadCustomersFromApi();
+    renderAll();
+    showToast(customerId ? "Cliente actualizado" : "Cliente agregado");
+  } catch (error) {
+    console.error(error);
+    showToast("No se pudo guardar el cliente");
+  }
+});
+
+$("#saleForm").addEventListener("submit", async event => {
   event.preventDefault();
   if (!cart.length) {
     showToast("Agrega al menos un servicio");
@@ -534,24 +761,34 @@ $("#saleForm").addEventListener("submit", event => {
   }
 
   const form = event.currentTarget;
-  const sale = {
-    id: crypto.randomUUID(),
-    date: todayISO(),
-    time: nowTime(),
-    customer: form.customer.value.trim(),
-    barber: form.barber.value,
-    payment: form.payment.value,
-    items: [...cart],
-    total: cart.reduce((sum, item) => sum + item.price, 0)
-  };
+  try {
+    const customer = await ensureCustomer(form.customer.value, form.phone.value);
+    const sale = {
+      id: crypto.randomUUID(),
+      date: todayISO(),
+      time: nowTime(),
+      customerId: customer?.id || null,
+      customer: form.customer.value.trim(),
+      phone: form.phone.value.trim(),
+      barber: form.barber.value,
+      payment: form.payment.value,
+      items: [...cart],
+      total: cart.reduce((sum, item) => sum + item.price, 0)
+    };
 
-  state.sales.push(sale);
-  cart = [];
-  form.reset();
-  saveState();
-  renderAll();
-  printBlock(saleTicket(sale));
-  showToast("Venta registrada");
+    state.sales.push(sale);
+    cart = [];
+    form.reset();
+    form.customer.readOnly = false;
+    delete form.customer.dataset.customerId;
+    saveState();
+    renderAll();
+    printBlock(saleTicket(sale));
+    showToast(customer ? "Venta y cliente guardados" : "Venta registrada");
+  } catch (error) {
+    console.error(error);
+    showToast("No se pudo registrar la venta");
+  }
 });
 
 async function initialize() {
@@ -560,7 +797,11 @@ async function initialize() {
   renderAll();
 
   try {
-    await Promise.all([loadServicesFromApi(), loadBarbersFromApi()]);
+    await Promise.all([
+      loadServicesFromApi(),
+      loadBarbersFromApi(),
+      loadCustomersFromApi()
+    ]);
     renderAll();
   } catch (error) {
     console.error(error);
