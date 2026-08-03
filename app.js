@@ -40,6 +40,7 @@ const defaultState = {
 let state = loadState();
 let cart = [];
 let catalogServices = [];
+let catalogBarbers = [];
 
 const moneyFormatter = new Intl.NumberFormat("es-MX", {
   style: "currency",
@@ -77,6 +78,22 @@ async function loadServicesFromApi() {
   saveState();
 }
 
+async function loadBarbersFromApi() {
+  const response = await fetch(`${API_BASE_URL}/barbers`);
+  if (!response.ok) throw new Error("No fue posible consultar los barberos");
+
+  const barbers = await response.json();
+  catalogBarbers = barbers.map(barber => ({
+    id: String(barber.id),
+    name: barber.name,
+    active: barber.active
+  }));
+  state.barbers = catalogBarbers
+    .filter(barber => barber.active)
+    .map(barber => barber.name);
+  saveState();
+}
+
 function resetServiceForm() {
   const form = $("#serviceForm");
   form.reset();
@@ -84,6 +101,15 @@ function resetServiceForm() {
   $("#serviceFormTitle").textContent = "Agregar servicio";
   $("#serviceSubmitLabel").textContent = "Agregar";
   $("#cancelServiceEdit").classList.add("hidden");
+}
+
+function resetBarberForm() {
+  const form = $("#barberForm");
+  form.reset();
+  form.barberId.value = "";
+  $("#barberFormTitle").textContent = "Agregar barbero";
+  $("#barberSubmitLabel").textContent = "Agregar";
+  $("#cancelBarberEdit").classList.add("hidden");
 }
 
 function $(selector) {
@@ -169,6 +195,32 @@ function renderServices() {
   `).join("");
 }
 
+function renderBarbers() {
+  const barbers = catalogBarbers.length
+    ? catalogBarbers
+    : state.barbers.map((name, index) => ({
+        id: String(index),
+        name,
+        active: true
+      }));
+
+  $("#barberList").innerHTML = barbers.map(barber => `
+    <div class="price-item ${barber.active ? "" : "inactive"}">
+      <div>
+        <strong>${barber.name}</strong>
+        <span>${barber.active ? "Activo" : "Inactivo"}</span>
+      </div>
+      <div class="catalog-actions">
+        <button class="chip-button" type="button" data-edit-barber="${barber.id}">Editar</button>
+        <button class="chip-button ${barber.active ? "danger" : "pay"}" type="button"
+          data-toggle-barber="${barber.id}">
+          ${barber.active ? "Desactivar" : "Activar"}
+        </button>
+      </div>
+    </div>
+  `).join("");
+}
+
 function renderCart() {
   if (!cart.length) {
     $("#cartItems").innerHTML = `<div class="cart-empty">Selecciona servicios para cobrar.</div>`;
@@ -219,6 +271,7 @@ function renderAll() {
   renderShell();
   renderAppointments();
   renderServices();
+  renderBarbers();
   renderCart();
   renderShift();
 }
@@ -323,6 +376,42 @@ document.addEventListener("click", async event => {
     }
   }
 
+  const editBarber = event.target.closest("[data-edit-barber]");
+  if (editBarber) {
+    const barber = catalogBarbers.find(item => item.id === editBarber.dataset.editBarber);
+    if (barber) {
+      const form = $("#barberForm");
+      form.barberId.value = barber.id;
+      form.name.value = barber.name;
+      $("#barberFormTitle").textContent = "Editar barbero";
+      $("#barberSubmitLabel").textContent = "Guardar cambios";
+      $("#cancelBarberEdit").classList.remove("hidden");
+      form.name.focus();
+    }
+  }
+
+  const toggleBarber = event.target.closest("[data-toggle-barber]");
+  if (toggleBarber) {
+    const barber = catalogBarbers.find(item => item.id === toggleBarber.dataset.toggleBarber);
+    if (!barber) return;
+    if (barber.active && !window.confirm(`¿Desactivar a "${barber.name}"?`)) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/barbers/${barber.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: !barber.active })
+      });
+      if (!response.ok) throw new Error("No fue posible cambiar el estado");
+      await loadBarbersFromApi();
+      renderAll();
+      showToast(barber.active ? "Barbero desactivado" : "Barbero activado");
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudo actualizar el barbero");
+    }
+  }
+
   const action = event.target.closest("[data-action]");
   if (action) {
     const appointment = state.appointments.find(item => item.id === action.dataset.id);
@@ -345,6 +434,7 @@ $("#appointmentSearch").addEventListener("input", renderAppointments);
 $("#clearCart").addEventListener("click", () => { cart = []; renderCart(); });
 $("#printShift").addEventListener("click", () => printBlock(shiftTicket()));
 $("#cancelServiceEdit").addEventListener("click", resetServiceForm);
+$("#cancelBarberEdit").addEventListener("click", resetBarberForm);
 
 $("#appointmentForm").addEventListener("submit", event => {
   event.preventDefault();
@@ -406,6 +496,36 @@ $("#serviceForm").addEventListener("submit", async event => {
   }
 });
 
+$("#barberForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const barberId = form.barberId.value;
+  const currentBarber = catalogBarbers.find(item => item.id === barberId);
+
+  try {
+    const response = await fetch(
+      barberId ? `${API_BASE_URL}/barbers/${barberId}` : `${API_BASE_URL}/barbers`,
+      {
+        method: barberId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name.value.trim(),
+          active: currentBarber?.active ?? true
+        })
+      }
+    );
+    if (!response.ok) throw new Error("No fue posible guardar el barbero");
+
+    resetBarberForm();
+    await loadBarbersFromApi();
+    renderAll();
+    showToast(barberId ? "Barbero actualizado" : "Barbero agregado");
+  } catch (error) {
+    console.error(error);
+    showToast("No se pudo guardar el barbero");
+  }
+});
+
 $("#saleForm").addEventListener("submit", event => {
   event.preventDefault();
   if (!cart.length) {
@@ -440,7 +560,7 @@ async function initialize() {
   renderAll();
 
   try {
-    await loadServicesFromApi();
+    await Promise.all([loadServicesFromApi(), loadBarbersFromApi()]);
     renderAll();
   } catch (error) {
     console.error(error);

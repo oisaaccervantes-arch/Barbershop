@@ -35,6 +35,10 @@
         <span class="material-symbols-outlined"></span>
         Catálogo
       </button>
+      <button class="nav-item" data-view="barbers">
+        <span class="material-symbols-outlined"></span>
+        Barberos
+      </button>
       <button class="nav-item" data-view="shift">
         <span class="material-symbols-outlined"></span>
         Corte de turno
@@ -219,6 +223,40 @@
             </div>
           </div>
           <div class="price-list" id="serviceList"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="barbers">
+      <div class="workspace two-columns">
+        <form class="panel form-panel" id="barberForm">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Personal</p>
+              <h3 id="barberFormTitle">Agregar barbero</h3>
+            </div>
+          </div>
+          <input name="barberId" type="hidden">
+          <label>Nombre
+            <input name="name" placeholder="Nombre del barbero" required>
+          </label>
+          <button class="submit-button" type="submit">
+            <span class="material-symbols-outlined">add</span>
+            <span id="barberSubmitLabel">Agregar</span>
+          </button>
+          <button class="secondary-button hidden" id="cancelBarberEdit" type="button">
+            Cancelar edición
+          </button>
+        </form>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Equipo</p>
+              <h3>Barberos registrados</h3>
+            </div>
+          </div>
+          <div class="price-list" id="barberList"></div>
         </div>
       </div>
     </section>
