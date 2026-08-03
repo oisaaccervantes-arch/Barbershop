@@ -1,10 +1,16 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
+from sqlalchemy import text
+
+from app.database import engine
+from app.routers.services import router as services_router
 
 
 app = FastAPI(
     title="Bizantino POS API",
     version="0.1.0",
 )
+
+app.include_router(services_router)
 
 
 @app.get("/")
@@ -15,3 +21,17 @@ def root():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/health/database")
+def database_health():
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No fue posible conectar con PostgreSQL",
+        ) from exc
+
+    return {"status": "ok", "database": "connected"}
