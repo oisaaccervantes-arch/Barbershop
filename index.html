@@ -122,6 +122,16 @@
             </div>
             <input class="search" id="appointmentSearch" placeholder="Buscar cliente o servicio">
           </div>
+          <div class="appointment-tabs" role="tablist" aria-label="Filtrar citas">
+            <button class="appointment-tab active" type="button" data-appointment-view="active">
+              Pendientes
+              <span id="activeAppointmentCount">0</span>
+            </button>
+            <button class="appointment-tab" type="button" data-appointment-view="history">
+              Historial
+              <span id="historyAppointmentCount">0</span>
+            </button>
+          </div>
           <div class="table-wrap">
             <table>
               <thead>

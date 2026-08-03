@@ -250,6 +250,42 @@ textarea {
   width: min(330px, 100%);
 }
 
+.appointment-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.appointment-tab {
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.appointment-tab.active {
+  background: #2b221a;
+  border-color: #2b221a;
+  color: white;
+}
+
+.appointment-tab span {
+  display: inline-grid;
+  min-width: 22px;
+  min-height: 22px;
+  margin-left: 6px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+}
+
 .table-wrap {
   overflow-x: auto;
 }

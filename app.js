@@ -44,6 +44,7 @@ let catalogServices = [];
 let catalogBarbers = [];
 let catalogCustomers = [];
 let pendingAppointmentId = null;
+let appointmentView = "active";
 
 const appointmentStatusFromApi = {
   PENDING: "pendiente",
@@ -309,7 +310,19 @@ function renderShell() {
 
 function renderAppointments() {
   const query = $("#appointmentSearch").value.trim().toLowerCase();
+  const activeStatuses = ["pendiente", "confirmada"];
+  const activeCount = state.appointments.filter(item =>
+    activeStatuses.includes(item.status)
+  ).length;
+  const historyCount = state.appointments.length - activeCount;
+  $("#activeAppointmentCount").textContent = activeCount;
+  $("#historyAppointmentCount").textContent = historyCount;
+
   const rows = state.appointments
+    .filter(item => appointmentView === "active"
+      ? activeStatuses.includes(item.status)
+      : !activeStatuses.includes(item.status)
+    )
     .filter(item => `${item.customer} ${item.serviceName} ${item.barber}`.toLowerCase().includes(query))
     .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
     .map(item => `
@@ -333,7 +346,10 @@ function renderAppointments() {
       </tr>
     `).join("");
 
-  $("#appointmentRows").innerHTML = rows || `<tr><td colspan="6">No hay citas registradas.</td></tr>`;
+  const emptyMessage = appointmentView === "active"
+    ? "No hay citas pendientes."
+    : "No hay citas en el historial.";
+  $("#appointmentRows").innerHTML = rows || `<tr><td colspan="6">${emptyMessage}</td></tr>`;
 }
 
 function renderServices() {
@@ -472,7 +488,15 @@ function renderAll() {
 function switchView(view) {
   document.querySelectorAll(".view").forEach(item => item.classList.toggle("active", item.id === view));
   document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.view === view));
-  $("#viewTitle").textContent = document.querySelector(`[data-view="${view}"]`).textContent.trim();
+  const titles = {
+    appointments: "Citas",
+    cashier: "Caja",
+    services: "Catálogo",
+    barbers: "Barberos",
+    customers: "Clientes",
+    shift: "Corte de turno"
+  };
+  $("#viewTitle").textContent = titles[view] || view;
 }
 
 function printBlock(html) {
@@ -517,6 +541,15 @@ function shiftTicket() {
 document.addEventListener("click", async event => {
   const nav = event.target.closest("[data-view]");
   if (nav) switchView(nav.dataset.view);
+
+  const appointmentTab = event.target.closest("[data-appointment-view]");
+  if (appointmentTab) {
+    appointmentView = appointmentTab.dataset.appointmentView;
+    document.querySelectorAll("[data-appointment-view]").forEach(tab =>
+      tab.classList.toggle("active", tab === appointmentTab)
+    );
+    renderAppointments();
+  }
 
   const serviceButton = event.target.closest("[data-service]");
   if (serviceButton) {
