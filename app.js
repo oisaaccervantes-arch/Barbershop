@@ -13,7 +13,7 @@ const defaultState = {
     { id: crypto.randomUUID(), name: "Tinte", price: 110, type: "Servicio" },
     { id: crypto.randomUUID(), name: "Corte y lavado", price: 270, type: "Servicio" },
     { id: crypto.randomUUID(), name: "Diseño", price: 100, type: "Extra" },
-    { id: crypto.randomUUID(), name: "Decoloracion", price: 600, type: "Extra" },
+    { id: crypto.randomUUID(), name: "Decoloración", price: 600, type: "Extra" },
     { id: crypto.randomUUID(), name: "Corte y barba express", price: 365, type: "Paquete" },
     { id: crypto.randomUUID(), name: "Corte, barba, mascarilla y lavado", price: 380, type: "Paquete" },
     { id: crypto.randomUUID(), name: "Corte, barba, mascarilla, tinte y lavado", price: 400, type: "Paquete" }
