@@ -1,4 +1,17 @@
 const STORE_KEY = "bizantino-barberia-v1";
+const API_BASE_URL = "http://127.0.0.1:8000/api";
+
+const serviceTypeToApi = {
+  Servicio: "SERVICE",
+  Paquete: "PACKAGE",
+  Extra: "EXTRA"
+};
+
+const serviceTypeFromApi = {
+  SERVICE: "Servicio",
+  PACKAGE: "Paquete",
+  EXTRA: "Extra"
+};
 
 const defaultState = {
   services: [
@@ -26,8 +39,15 @@ const defaultState = {
 
 let state = loadState();
 let cart = [];
+let catalogServices = [];
 
-const money = value => `$${Number(value).toLocaleString("es-MX")}`;
+const moneyFormatter = new Intl.NumberFormat("es-MX", {
+  style: "currency",
+  currency: "MXN",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2
+});
+const money = value => moneyFormatter.format(Number(value));
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const nowTime = () => new Date().toTimeString().slice(0, 5);
 
@@ -38,6 +58,32 @@ function loadState() {
 
 function saveState() {
   localStorage.setItem(STORE_KEY, JSON.stringify(state));
+}
+
+async function loadServicesFromApi() {
+  const response = await fetch(`${API_BASE_URL}/services`);
+  if (!response.ok) throw new Error("No fue posible consultar el catálogo");
+
+  const services = await response.json();
+  catalogServices = services.map(service => ({
+    id: String(service.id),
+    name: service.name,
+    price: Number(service.price),
+    type: serviceTypeFromApi[service.type],
+    active: service.active,
+    displayOrder: service.display_order
+  }));
+  state.services = catalogServices.filter(service => service.active);
+  saveState();
+}
+
+function resetServiceForm() {
+  const form = $("#serviceForm");
+  form.reset();
+  form.serviceId.value = "";
+  $("#serviceFormTitle").textContent = "Agregar servicio";
+  $("#serviceSubmitLabel").textContent = "Agregar";
+  $("#cancelServiceEdit").classList.add("hidden");
 }
 
 function $(selector) {
@@ -104,13 +150,21 @@ function renderServices() {
     </button>
   `).join("");
 
-  $("#serviceList").innerHTML = state.services.map(service => `
-    <div class="price-item">
+  const catalog = catalogServices.length ? catalogServices : state.services;
+  $("#serviceList").innerHTML = catalog.map(service => `
+    <div class="price-item ${service.active === false ? "inactive" : ""}">
       <div>
         <strong>${service.name}</strong>
-        <span>${service.type}</span>
+        <span>${service.type}${service.active === false ? " · Inactivo" : ""}</span>
       </div>
-      <strong>${money(service.price)}</strong>
+      <div class="catalog-actions">
+        <strong>${money(service.price)}</strong>
+        <button class="chip-button" type="button" data-edit-service="${service.id}">Editar</button>
+        <button class="chip-button ${service.active === false ? "pay" : "danger"}" type="button"
+          data-toggle-service="${service.id}">
+          ${service.active === false ? "Activar" : "Desactivar"}
+        </button>
+      </div>
     </div>
   `).join("");
 }
@@ -214,7 +268,7 @@ function shiftTicket() {
   `;
 }
 
-document.addEventListener("click", event => {
+document.addEventListener("click", async event => {
   const nav = event.target.closest("[data-view]");
   if (nav) switchView(nav.dataset.view);
 
@@ -229,6 +283,44 @@ document.addEventListener("click", event => {
   if (remove) {
     cart.splice(Number(remove.dataset.remove), 1);
     renderCart();
+  }
+
+  const editService = event.target.closest("[data-edit-service]");
+  if (editService) {
+    const service = catalogServices.find(item => item.id === editService.dataset.editService);
+    if (service) {
+      const form = $("#serviceForm");
+      form.serviceId.value = service.id;
+      form.name.value = service.name;
+      form.price.value = service.price;
+      form.type.value = service.type;
+      $("#serviceFormTitle").textContent = "Editar servicio";
+      $("#serviceSubmitLabel").textContent = "Guardar cambios";
+      $("#cancelServiceEdit").classList.remove("hidden");
+      form.name.focus();
+    }
+  }
+
+  const toggleService = event.target.closest("[data-toggle-service]");
+  if (toggleService) {
+    const service = catalogServices.find(item => item.id === toggleService.dataset.toggleService);
+    if (!service) return;
+    if (service.active && !window.confirm(`¿Desactivar "${service.name}"?`)) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/services/${service.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: !service.active })
+      });
+      if (!response.ok) throw new Error("No fue posible cambiar el estado");
+      await loadServicesFromApi();
+      renderAll();
+      showToast(service.active ? "Servicio desactivado" : "Servicio activado");
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudo actualizar el servicio");
+    }
   }
 
   const action = event.target.closest("[data-action]");
@@ -252,6 +344,7 @@ $("#quickAppointment").addEventListener("click", () => switchView("appointments"
 $("#appointmentSearch").addEventListener("input", renderAppointments);
 $("#clearCart").addEventListener("click", () => { cart = []; renderCart(); });
 $("#printShift").addEventListener("click", () => printBlock(shiftTicket()));
+$("#cancelServiceEdit").addEventListener("click", resetServiceForm);
 
 $("#appointmentForm").addEventListener("submit", event => {
   event.preventDefault();
@@ -277,19 +370,40 @@ $("#appointmentForm").addEventListener("submit", event => {
   showToast("Cita guardada");
 });
 
-$("#serviceForm").addEventListener("submit", event => {
+$("#serviceForm").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.currentTarget;
-  state.services.push({
-    id: crypto.randomUUID(),
-    name: form.name.value.trim(),
-    price: Number(form.price.value),
-    type: form.type.value
-  });
-  form.reset();
-  saveState();
-  renderAll();
-  showToast("Servicio agregado");
+  const serviceId = form.serviceId.value;
+  const currentService = catalogServices.find(item => item.id === serviceId);
+  const nextOrder = catalogServices.length
+    ? Math.max(...catalogServices.map(item => item.displayOrder || 0)) + 1
+    : 1;
+
+  try {
+    const response = await fetch(
+      serviceId ? `${API_BASE_URL}/services/${serviceId}` : `${API_BASE_URL}/services`,
+      {
+      method: serviceId ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: form.name.value.trim(),
+        price: Number(form.price.value),
+        type: serviceTypeToApi[form.type.value],
+        active: currentService?.active ?? true,
+        display_order: currentService?.displayOrder ?? nextOrder
+      })
+    });
+
+    if (!response.ok) throw new Error("No fue posible guardar el servicio");
+
+    resetServiceForm();
+    await loadServicesFromApi();
+    renderAll();
+    showToast(serviceId ? "Servicio actualizado" : "Servicio agregado");
+  } catch (error) {
+    console.error(error);
+    showToast("No se pudo conectar con el servidor");
+  }
 });
 
 $("#saleForm").addEventListener("submit", event => {
@@ -320,6 +434,18 @@ $("#saleForm").addEventListener("submit", event => {
   showToast("Venta registrada");
 });
 
-$("#appointmentForm").date.value = todayISO();
-$("#appointmentForm").time.value = nowTime();
-renderAll();
+async function initialize() {
+  $("#appointmentForm").date.value = todayISO();
+  $("#appointmentForm").time.value = nowTime();
+  renderAll();
+
+  try {
+    await loadServicesFromApi();
+    renderAll();
+  } catch (error) {
+    console.error(error);
+    showToast("Catálogo sin conexión; se muestran datos guardados");
+  }
+}
+
+initialize();

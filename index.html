@@ -185,15 +185,16 @@
         <form class="panel form-panel" id="serviceForm">
           <div class="panel-header">
             <div>
-              <p class="eyebrow">Catalogo</p>
-              <h3>Agregar servicio</h3>
+              <p class="eyebrow">Catálogo</p>
+              <h3 id="serviceFormTitle">Agregar servicio</h3>
             </div>
           </div>
+          <input name="serviceId" type="hidden">
           <label>Nombre
             <input name="name" placeholder="Ej. Corte adulto" required>
           </label>
           <label>Precio
-            <input name="price" min="0" step="1" type="number" required>
+            <input name="price" min="0" step="0.01" inputmode="decimal" type="number" required>
           </label>
           <label>Tipo
             <select name="type">
@@ -202,16 +203,19 @@
               <option>Extra</option>
             </select>
           </label>
-          <button class="submit-button" type="submit">
+          <button class="submit-button" id="serviceSubmitButton" type="submit">
             <span class="material-symbols-outlined">add</span>
-            Agregar
+            <span id="serviceSubmitLabel">Agregar</span>
+          </button>
+          <button class="secondary-button hidden" id="cancelServiceEdit" type="button">
+            Cancelar edición
           </button>
         </form>
         <div class="panel">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Precios</p>
-              <h3>Menu de servicios</h3>
+              <h3>Menú de servicios</h3>
             </div>
           </div>
           <div class="price-list" id="serviceList"></div>

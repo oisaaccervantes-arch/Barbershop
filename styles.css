@@ -216,6 +216,19 @@ input, select {
   padding: 10px 14px;
 }
 
+.secondary-button {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.hidden { display: none; }
+
 .submit-button.compact {
   width: auto;
 }
@@ -346,6 +359,17 @@ td small { color: var(--muted); }
 .price-item {
   break-inside: avoid;
   background: white;
+}
+
+.price-item.inactive {
+  opacity: .58;
+  background: var(--surface);
+}
+
+.catalog-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .summary-grid {
