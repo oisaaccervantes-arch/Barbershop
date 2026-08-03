@@ -3,7 +3,7 @@ const STORE_KEY = "bizantino-barberia-v1";
 const defaultState = {
   services: [
     { id: crypto.randomUUID(), name: "Corte adulto", price: 250, type: "Servicio" },
-    { id: crypto.randomUUID(), name: "Corte nino", price: 230, type: "Servicio" },
+    { id: crypto.randomUUID(), name: "Corte niño", price: 230, type: "Servicio" },
     { id: crypto.randomUUID(), name: "Corte y barba", price: 365, type: "Servicio" },
     { id: crypto.randomUUID(), name: "Barba express", price: 170, type: "Servicio" },
     { id: crypto.randomUUID(), name: "Barba premium", price: 185, type: "Servicio" },
@@ -12,13 +12,14 @@ const defaultState = {
     { id: crypto.randomUUID(), name: "Ceja", price: 110, type: "Servicio" },
     { id: crypto.randomUUID(), name: "Tinte", price: 110, type: "Servicio" },
     { id: crypto.randomUUID(), name: "Corte y lavado", price: 270, type: "Servicio" },
-    { id: crypto.randomUUID(), name: "Alta agregar diseno", price: 100, type: "Extra" },
+    { id: crypto.randomUUID(), name: "Diseño", price: 100, type: "Extra" },
     { id: crypto.randomUUID(), name: "Decoloracion", price: 600, type: "Extra" },
     { id: crypto.randomUUID(), name: "Corte y barba express", price: 365, type: "Paquete" },
     { id: crypto.randomUUID(), name: "Corte, barba, mascarilla y lavado", price: 380, type: "Paquete" },
     { id: crypto.randomUUID(), name: "Corte, barba, mascarilla, tinte y lavado", price: 400, type: "Paquete" }
+
   ],
-  barbers: ["Osiel", "Carlos", "Luis"],
+  barbers: ["Peke", "Alfonso", "Manos puercas"],
   appointments: [],
   sales: []
 };
