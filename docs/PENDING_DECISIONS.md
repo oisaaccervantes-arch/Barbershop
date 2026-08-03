@@ -12,3 +12,20 @@ Confirmar con el dueño cómo deben manejarse las citas simultáneas:
   completos, no solamente la hora de inicio.
 - Hasta confirmar estas reglas, el sistema exigirá seleccionar un barbero, pero
   no rechazará automáticamente horarios coincidentes.
+
+## Corte de turno y reporte semanal
+
+Mantener separados estos conceptos:
+
+- **Corte de turno:** apertura/cierre de una caja y conciliación de efectivo,
+  tarjeta y transferencia.
+- **Ventas/Reportes:** consulta histórica por día, semana o rango de fechas.
+
+Confirmar con el dueño:
+
+- Qué día comienza y termina la semana de trabajo.
+- Si el reporte semanal se desglosa por barbero.
+- Si se mostrarán comisiones, propinas y descuentos.
+- Cómo deben aparecer ventas canceladas o reembolsadas.
+- Si el corte de turno es diario o puede haber varios turnos el mismo día.
+- Quién puede consultar e imprimir los reportes históricos.

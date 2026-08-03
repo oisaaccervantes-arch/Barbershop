@@ -450,7 +450,11 @@ function renderCart() {
 }
 
 function renderShift() {
-  const salesToday = state.sales.filter(sale => sale.date === todayISO());
+  const salesToday = state.sales
+    .filter(sale => sale.date === todayISO())
+    .sort((a, b) =>
+      `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)
+    );
   const total = salesToday.reduce((sum, sale) => sum + sale.total, 0);
   const byMethod = method => salesToday.filter(sale => sale.payment === method).reduce((sum, sale) => sum + sale.total, 0);
 
@@ -525,7 +529,11 @@ function saleTicket(sale) {
 }
 
 function shiftTicket() {
-  const salesToday = state.sales.filter(sale => sale.date === todayISO());
+  const salesToday = state.sales
+    .filter(sale => sale.date === todayISO())
+    .sort((a, b) =>
+      `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)
+    );
   const total = salesToday.reduce((sum, sale) => sum + sale.total, 0);
   return `
     <h2 style="text-align:center;margin:0">BIZANTINO</h2>
