@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bizantino Barberia | Citas y Caja</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <span class="material-symbols-outlined">content_cut</span>
+      </div>
+      <div>
+        <h1>Bizantino</h1>
+        <p>Barberia</p>
+      </div>
+    </div>
+
+    <nav class="nav" aria-label="Modulos">
+      <button class="nav-item active" data-view="appointments">
+        <span class="material-symbols-outlined">event_available</span>
+        Citas
+      </button>
+      <button class="nav-item" data-view="cashier">
+        <span class="material-symbols-outlined">point_of_sale</span>
+        Caja
+      </button>
+      <button class="nav-item" data-view="services">
+        <span class="material-symbols-outlined">content_cut</span>
+        Servicios
+      </button>
+      <button class="nav-item" data-view="shift">
+        <span class="material-symbols-outlined">receipt_long</span>
+        Corte de turno
+      </button>
+    </nav>
+
+    <button class="primary-action" id="quickAppointment">
+      <span class="material-symbols-outlined">add</span>
+      Nueva cita
+    </button>
+  </aside>
+
+  <main class="app">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow" id="todayLabel"></p>
+        <h2 id="viewTitle">Citas</h2>
+      </div>
+      <div class="topbar-actions">
+        <div class="metric">
+          <span>Ventas hoy</span>
+          <strong id="todaySales">$0</strong>
+        </div>
+        <div class="metric">
+          <span>Citas activas</span>
+          <strong id="activeAppointments">0</strong>
+        </div>
+      </div>
+    </header>
+
+    <section class="view active" id="appointments">
+      <div class="workspace two-columns">
+        <form class="panel form-panel" id="appointmentForm">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Agenda</p>
+              <h3>Nueva cita</h3>
+            </div>
+            <button class="icon-button" type="reset" title="Limpiar">
+              <span class="material-symbols-outlined">refresh</span>
+            </button>
+          </div>
+
+          <label>Cliente
+            <input name="customer" placeholder="Nombre del cliente" required>
+          </label>
+          <label>Telefono
+            <input name="phone" placeholder="Opcional">
+          </label>
+          <div class="form-grid">
+            <label>Fecha
+              <input name="date" type="date" required>
+            </label>
+            <label>Hora
+              <input name="time" type="time" required>
+            </label>
+          </div>
+          <label>Barbero
+            <select name="barber" required></select>
+          </label>
+          <label>Servicio
+            <select name="serviceId" required></select>
+          </label>
+          <button class="submit-button" type="submit">
+            <span class="material-symbols-outlined">save</span>
+            Guardar cita
+          </button>
+        </form>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Hoy y proximas</p>
+              <h3>Lista de citas</h3>
+            </div>
+            <input class="search" id="appointmentSearch" placeholder="Buscar cliente o servicio">
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Cliente</th>
+                  <th>Servicio</th>
+                  <th>Barbero</th>
+                  <th>Fecha</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="appointmentRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="cashier">
+      <div class="workspace two-columns cashier-layout">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Venta rapida</p>
+              <h3>Servicios</h3>
+            </div>
+          </div>
+          <div class="service-grid" id="cashierServices"></div>
+        </div>
+
+        <form class="panel checkout" id="saleForm">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Cobro</p>
+              <h3>Ticket</h3>
+            </div>
+            <button class="icon-button" id="clearCart" type="button" title="Vaciar">
+              <span class="material-symbols-outlined">delete</span>
+            </button>
+          </div>
+          <label>Cliente
+            <input name="customer" placeholder="Publico general">
+          </label>
+          <label>Barbero
+            <select name="barber" required></select>
+          </label>
+          <div class="cart" id="cartItems"></div>
+          <div class="total-line">
+            <span>Total</span>
+            <strong id="cartTotal">$0</strong>
+          </div>
+          <label>Metodo de pago
+            <select name="payment">
+              <option>Efectivo</option>
+              <option>Tarjeta</option>
+              <option>Transferencia</option>
+              <option>Mixto</option>
+            </select>
+          </label>
+          <button class="submit-button" type="submit">
+            <span class="material-symbols-outlined">print</span>
+            Cobrar e imprimir
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <section class="view" id="services">
+      <div class="workspace two-columns">
+        <form class="panel form-panel" id="serviceForm">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Catalogo</p>
+              <h3>Agregar servicio</h3>
+            </div>
+          </div>
+          <label>Nombre
+            <input name="name" placeholder="Ej. Corte adulto" required>
+          </label>
+          <label>Precio
+            <input name="price" min="0" step="1" type="number" required>
+          </label>
+          <label>Tipo
+            <select name="type">
+              <option>Servicio</option>
+              <option>Paquete</option>
+              <option>Extra</option>
+            </select>
+          </label>
+          <button class="submit-button" type="submit">
+            <span class="material-symbols-outlined">add</span>
+            Agregar
+          </button>
+        </form>
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Precios</p>
+              <h3>Menu de servicios</h3>
+            </div>
+          </div>
+          <div class="price-list" id="serviceList"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="shift">
+      <div class="workspace">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Caja</p>
+              <h3>Corte de turno</h3>
+            </div>
+            <button class="submit-button compact" id="printShift">
+              <span class="material-symbols-outlined">print</span>
+              Imprimir corte
+            </button>
+          </div>
+          <div class="summary-grid" id="shiftSummary"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Hora</th>
+                  <th>Cliente</th>
+                  <th>Servicios</th>
+                  <th>Barbero</th>
+                  <th>Pago</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+              <tbody id="saleRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
