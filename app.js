@@ -43,6 +43,21 @@ let cart = [];
 let catalogServices = [];
 let catalogBarbers = [];
 let catalogCustomers = [];
+let pendingAppointmentId = null;
+
+const appointmentStatusFromApi = {
+  PENDING: "pendiente",
+  CONFIRMED: "confirmada",
+  COMPLETED: "atendida",
+  CANCELLED: "cancelada"
+};
+
+const appointmentStatusToApi = {
+  pendiente: "PENDING",
+  confirmada: "CONFIRMED",
+  atendida: "COMPLETED",
+  cancelada: "CANCELLED"
+};
 
 const moneyFormatter = new Intl.NumberFormat("es-MX", {
   style: "currency",
@@ -115,6 +130,39 @@ async function loadCustomersFromApi() {
   }));
   state.customers = catalogCustomers.filter(customer => customer.active);
   saveState();
+}
+
+async function loadAppointmentsFromApi() {
+  const response = await fetch(`${API_BASE_URL}/appointments`);
+  if (!response.ok) throw new Error("No fue posible consultar las citas");
+
+  state.appointments = (await response.json()).map(appointment => ({
+    id: String(appointment.id),
+    customerId: String(appointment.customer_id),
+    customer: appointment.customer_name,
+    phone: appointment.customer_phone,
+    date: appointment.appointment_date,
+    time: appointment.appointment_time.slice(0, 5),
+    barberId: String(appointment.barber_id),
+    barber: appointment.barber_name,
+    serviceId: String(appointment.service_id),
+    serviceName: appointment.service_name,
+    price: Number(appointment.price),
+    status: appointmentStatusFromApi[appointment.status]
+  }));
+  saveState();
+}
+
+async function updateAppointmentStatus(appointmentId, status) {
+  const response = await fetch(
+    `${API_BASE_URL}/appointments/${appointmentId}/status`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status })
+    }
+  );
+  if (!response.ok) throw new Error("No fue posible actualizar la cita");
 }
 
 async function ensureCustomer(name, phone) {
@@ -231,7 +279,12 @@ function showToast(message) {
 
 function renderSelects() {
   document.querySelectorAll('select[name="barber"]').forEach(select => {
-    select.innerHTML = state.barbers.map(name => `<option>${name}</option>`).join("");
+    const barbers = catalogBarbers.length
+      ? catalogBarbers.filter(barber => barber.active)
+      : state.barbers.map(name => ({ id: name, name }));
+    select.innerHTML = barbers
+      .map(barber => `<option value="${barber.id}">${escapeHtml(barber.name)}</option>`)
+      .join("");
   });
 
   const serviceOptions = state.services
@@ -267,11 +320,15 @@ function renderAppointments() {
         <td>${item.date}<br><small>${item.time}</small></td>
         <td><span class="status ${item.status}">${item.status}</span></td>
         <td>
-          <div class="row-actions">
-            <button class="chip-button" data-action="confirm" data-id="${item.id}">Confirmar</button>
-            <button class="chip-button pay" data-action="charge" data-id="${item.id}">Cobrar</button>
-            <button class="chip-button danger" data-action="cancel" data-id="${item.id}">Cancelar</button>
-          </div>
+          ${["atendida", "cancelada"].includes(item.status) ? "" : `
+            <div class="row-actions">
+              ${item.status === "pendiente"
+                ? `<button class="chip-button" data-action="confirm" data-id="${item.id}">Confirmar</button>`
+                : ""}
+              <button class="chip-button pay" data-action="charge" data-id="${item.id}">Cobrar</button>
+              <button class="chip-button danger" data-action="cancel" data-id="${item.id}">Cancelar</button>
+            </div>
+          `}
         </td>
       </tr>
     `).join("");
@@ -589,19 +646,33 @@ document.addEventListener("click", async event => {
   const action = event.target.closest("[data-action]");
   if (action) {
     const appointment = state.appointments.find(item => item.id === action.dataset.id);
-    if (action.dataset.action === "confirm") appointment.status = "confirmada";
-    if (action.dataset.action === "cancel") appointment.status = "cancelada";
-    if (action.dataset.action === "charge") {
-      cart = [{ id: appointment.serviceId, name: appointment.serviceName, price: appointment.price }];
-      $("#saleForm").customer.value = appointment.customer;
-      $("#saleForm").phone.value = appointment.phone || "";
-      $("#saleForm").customer.readOnly = Boolean(appointment.customerId);
-      $("#saleForm").barber.value = appointment.barber;
-      appointment.status = "atendida";
-      switchView("cashier");
+    try {
+      if (action.dataset.action === "confirm") {
+        await updateAppointmentStatus(appointment.id, "CONFIRMED");
+        await loadAppointmentsFromApi();
+        renderAll();
+        showToast("Cita confirmada");
+      }
+      if (action.dataset.action === "cancel") {
+        await updateAppointmentStatus(appointment.id, "CANCELLED");
+        await loadAppointmentsFromApi();
+        renderAll();
+        showToast("Cita cancelada");
+      }
+      if (action.dataset.action === "charge") {
+        cart = [{ id: appointment.serviceId, name: appointment.serviceName, price: appointment.price }];
+        $("#saleForm").customer.value = appointment.customer;
+        $("#saleForm").phone.value = appointment.phone || "";
+        $("#saleForm").customer.readOnly = true;
+        $("#saleForm").barber.value = appointment.barberId;
+        pendingAppointmentId = appointment.id;
+        switchView("cashier");
+        renderCart();
+      }
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudo actualizar la cita");
     }
-    saveState();
-    renderAll();
   }
 });
 
@@ -623,22 +694,22 @@ $("#saleForm").phone.addEventListener("input", () =>
 $("#appointmentForm").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.currentTarget;
-  const service = state.services.find(item => item.id === form.serviceId.value);
   try {
     const customer = await ensureCustomer(form.customer.value, form.phone.value);
-    state.appointments.push({
-      id: crypto.randomUUID(),
-      customerId: customer?.id || null,
-      customer: form.customer.value.trim(),
-      phone: form.phone.value.trim(),
-      date: form.date.value,
-      time: form.time.value,
-      barber: form.barber.value,
-      serviceId: service.id,
-      serviceName: service.name,
-      price: service.price,
-      status: "pendiente"
+    const response = await fetch(`${API_BASE_URL}/appointments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        customer_id: Number(customer.id),
+        barber_id: Number(form.barber.value),
+        service_id: Number(form.serviceId.value),
+        appointment_date: form.date.value,
+        appointment_time: form.time.value
+      })
     });
+    if (!response.ok) throw new Error("No fue posible guardar la cita");
+
+    await loadAppointmentsFromApi();
     form.reset();
     form.customer.readOnly = false;
     delete form.customer.dataset.customerId;
@@ -646,7 +717,7 @@ $("#appointmentForm").addEventListener("submit", async event => {
     form.time.value = nowTime();
     saveState();
     renderAll();
-    showToast("Cita y cliente guardados");
+    showToast("Cita guardada");
   } catch (error) {
     console.error(error);
     showToast("No se pudo registrar la cita");
@@ -763,6 +834,7 @@ $("#saleForm").addEventListener("submit", async event => {
   const form = event.currentTarget;
   try {
     const customer = await ensureCustomer(form.customer.value, form.phone.value);
+    const barber = catalogBarbers.find(item => item.id === form.barber.value);
     const sale = {
       id: crypto.randomUUID(),
       date: todayISO(),
@@ -770,7 +842,8 @@ $("#saleForm").addEventListener("submit", async event => {
       customerId: customer?.id || null,
       customer: form.customer.value.trim(),
       phone: form.phone.value.trim(),
-      barber: form.barber.value,
+      barberId: form.barber.value,
+      barber: barber?.name || form.barber.value,
       payment: form.payment.value,
       items: [...cart],
       total: cart.reduce((sum, item) => sum + item.price, 0)
@@ -782,9 +855,25 @@ $("#saleForm").addEventListener("submit", async event => {
     form.customer.readOnly = false;
     delete form.customer.dataset.customerId;
     saveState();
+
+    let appointmentCompleted = true;
+    if (pendingAppointmentId) {
+      try {
+        await updateAppointmentStatus(pendingAppointmentId, "COMPLETED");
+        await loadAppointmentsFromApi();
+      } catch (error) {
+        appointmentCompleted = false;
+        console.error(error);
+      }
+    }
+    pendingAppointmentId = null;
     renderAll();
     printBlock(saleTicket(sale));
-    showToast(customer ? "Venta y cliente guardados" : "Venta registrada");
+    showToast(
+      appointmentCompleted
+        ? (customer ? "Venta y cliente guardados" : "Venta registrada")
+        : "Venta guardada; revisa el estado de la cita"
+    );
   } catch (error) {
     console.error(error);
     showToast("No se pudo registrar la venta");
@@ -800,7 +889,8 @@ async function initialize() {
     await Promise.all([
       loadServicesFromApi(),
       loadBarbersFromApi(),
-      loadCustomersFromApi()
+      loadCustomersFromApi(),
+      loadAppointmentsFromApi()
     ]);
     renderAll();
   } catch (error) {

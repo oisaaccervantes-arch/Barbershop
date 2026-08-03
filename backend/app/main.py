@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.database import engine
+from app.routers.appointments import router as appointments_router
 from app.routers.barbers import router as barbers_router
 from app.routers.customers import router as customers_router
 from app.routers.services import router as services_router
@@ -21,6 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(appointments_router)
 app.include_router(barbers_router)
 app.include_router(customers_router)
 app.include_router(services_router)
