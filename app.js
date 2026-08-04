@@ -60,6 +60,12 @@ const appointmentStatusToApi = {
   cancelada: "CANCELLED"
 };
 
+const paymentMethodLabels = {
+  CASH: "Efectivo",
+  CARD: "Tarjeta",
+  TRANSFER: "Transferencia"
+};
+
 const moneyFormatter = new Intl.NumberFormat("es-MX", {
   style: "currency",
   currency: "MXN",
@@ -67,7 +73,9 @@ const moneyFormatter = new Intl.NumberFormat("es-MX", {
   maximumFractionDigits: 2
 });
 const money = value => moneyFormatter.format(Number(value));
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const dateToLocalISO = date =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const todayISO = () => dateToLocalISO(new Date());
 const nowTime = () => new Date().toTimeString().slice(0, 5);
 const escapeHtml = value => String(value)
   .replaceAll("&", "&amp;")
@@ -151,6 +159,52 @@ async function loadAppointmentsFromApi() {
     price: Number(appointment.price),
     status: appointmentStatusFromApi[appointment.status]
   }));
+  saveState();
+}
+
+function mapSaleFromApi(sale) {
+  const soldAt = new Date(sale.sold_at);
+  return {
+    id: String(sale.id),
+    folio: sale.folio,
+    date: dateToLocalISO(soldAt),
+    time: soldAt.toLocaleTimeString("es-MX", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }),
+    customerId: sale.customer_id ? String(sale.customer_id) : null,
+    customer: sale.customer_name || "",
+    barberId: String(sale.barber_id),
+    barber: sale.barber_name,
+    appointmentId: sale.appointment_id ? String(sale.appointment_id) : null,
+    payment: sale.payments.length > 1
+      ? "Mixto"
+      : paymentMethodLabels[sale.payments[0]?.method] || "Sin pago",
+    payments: sale.payments.map(payment => ({
+      method: payment.method,
+      amount: Number(payment.amount),
+      tenderedAmount: payment.tendered_amount === null
+        ? null
+        : Number(payment.tendered_amount),
+      changeAmount: payment.change_amount === null
+        ? null
+        : Number(payment.change_amount)
+    })),
+    items: sale.items.map(item => ({
+      id: String(item.service_id),
+      name: item.service_name,
+      price: Number(item.unit_price),
+      quantity: item.quantity
+    })),
+    total: Number(sale.total)
+  };
+}
+
+async function loadSalesFromApi() {
+  const response = await fetch(`${API_BASE_URL}/sales`);
+  if (!response.ok) throw new Error("No fue posible consultar las ventas");
+  state.sales = (await response.json()).map(mapSaleFromApi);
   saveState();
 }
 
@@ -265,6 +319,67 @@ function autofillCustomerByPhone(form) {
     }
     form.customer.readOnly = false;
   }
+}
+
+const roundMoney = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+const getCartTotal = () => roundMoney(
+  cart.reduce((sum, item) => sum + Number(item.price), 0)
+);
+
+function updatePaymentFields() {
+  const form = $("#saleForm");
+  const method = form.payment.value;
+  const total = getCartTotal();
+  $("#cashPaymentFields").classList.toggle("hidden", method !== "CASH");
+  $("#mixedPaymentFields").classList.toggle("hidden", method !== "MIXED");
+
+  const cashReceived = Number(form.cashReceived.value || total);
+  $("#cashChange").textContent = money(Math.max(0, cashReceived - total));
+
+  const assigned = roundMoney(
+    Number(form.mixedCash.value || 0)
+    + Number(form.mixedCard.value || 0)
+    + Number(form.mixedTransfer.value || 0)
+  );
+  const remaining = roundMoney(total - assigned);
+  $("#mixedPaymentStatus").textContent = remaining > 0
+    ? "Falta asignar"
+    : remaining < 0
+      ? "Excede el total"
+      : "Pago completo";
+  $("#mixedPaymentRemaining").textContent = money(Math.abs(remaining));
+}
+
+function buildPayments(form, total) {
+  const method = form.payment.value;
+  if (method === "CASH") {
+    const tendered = roundMoney(Number(form.cashReceived.value || total));
+    if (tendered < total) throw new Error("El efectivo recibido es insuficiente");
+    return [{ method: "CASH", amount: total, tendered_amount: tendered }];
+  }
+  if (method === "CARD" || method === "TRANSFER") {
+    return [{ method, amount: total, tendered_amount: null }];
+  }
+
+  const values = [
+    ["CASH", roundMoney(form.mixedCash.value)],
+    ["CARD", roundMoney(form.mixedCard.value)],
+    ["TRANSFER", roundMoney(form.mixedTransfer.value)]
+  ].filter(([, amount]) => amount > 0);
+  if (values.length < 2) {
+    throw new Error("Un pago mixto requiere al menos dos métodos");
+  }
+  const assigned = roundMoney(values.reduce((sum, [, amount]) => sum + amount, 0));
+  if (assigned !== total) {
+    throw new Error("La suma de pagos no coincide con el total");
+  }
+  return values.map(([paymentMethod, amount]) => ({
+    method: paymentMethod,
+    amount,
+    tendered_amount: paymentMethod === "CASH"
+      ? roundMoney(Number(form.mixedCashReceived.value || amount))
+      : null
+  }));
 }
 
 function $(selector) {
@@ -447,6 +562,7 @@ function renderCart() {
   }
 
   $("#cartTotal").textContent = money(cart.reduce((sum, item) => sum + item.price, 0));
+  updatePaymentFields();
 }
 
 function renderShift() {
@@ -454,16 +570,27 @@ function renderShift() {
     .filter(sale => sale.date === todayISO())
     .sort((a, b) =>
       `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)
-    );
+  );
   const total = salesToday.reduce((sum, sale) => sum + sale.total, 0);
-  const byMethod = method => salesToday.filter(sale => sale.payment === method).reduce((sum, sale) => sum + sale.total, 0);
+  const byMethod = method => salesToday.reduce(
+    (sum, sale) => sum + (sale.payments || [])
+      .filter(payment => payment.method === method)
+      .reduce((paymentSum, payment) => paymentSum + payment.amount, 0),
+    0
+  );
 
   $("#shiftSummary").innerHTML = [
     ["Total", money(total)],
-    ["Efectivo", money(byMethod("Efectivo"))],
-    ["Tarjeta", money(byMethod("Tarjeta"))],
-    ["Transferencia", money(byMethod("Transferencia"))],
-    ["Servicios", salesToday.reduce((sum, sale) => sum + sale.items.length, 0)]
+    ["Efectivo", money(byMethod("CASH"))],
+    ["Tarjeta", money(byMethod("CARD"))],
+    ["Transferencia", money(byMethod("TRANSFER"))],
+    ["Servicios", salesToday.reduce(
+      (sum, sale) => sum + sale.items.reduce(
+        (itemSum, item) => itemSum + (item.quantity || 1),
+        0
+      ),
+      0
+    )]
   ].map(([label, value]) => `<div class="summary-card"><span>${label}</span><strong>${value}</strong></div>`).join("");
 
   $("#saleRows").innerHTML = salesToday.map(sale => `
@@ -517,13 +644,23 @@ function saleTicket(sale) {
     <h2 style="text-align:center;margin:0">BIZANTINO</h2>
     <p style="text-align:center;margin:0 0 10px">Barberia</p>
     <hr>
-    <p>Folio: ${sale.id.slice(0, 8).toUpperCase()}<br>Fecha: ${sale.date} ${sale.time}<br>Barbero: ${sale.barber}</p>
+    <p>Folio: ${(sale.folio || sale.id).slice(0, 8).toUpperCase()}<br>Fecha: ${sale.date} ${sale.time}<br>Barbero: ${sale.barber}</p>
     <p>Cliente: ${sale.customer || "Publico general"}</p>
     <hr>
-    ${sale.items.map(item => `<p style="display:flex;justify-content:space-between"><span>${item.name}</span><strong>${money(item.price)}</strong></p>`).join("")}
+    ${sale.items.map(item => `<p style="display:flex;justify-content:space-between"><span>${item.quantity > 1 ? `${item.quantity} × ` : ""}${item.name}</span><strong>${money(item.price * (item.quantity || 1))}</strong></p>`).join("")}
     <hr>
     <h3 style="display:flex;justify-content:space-between"><span>Total</span><span>${money(sale.total)}</span></h3>
     <p>Pago: ${sale.payment}</p>
+    ${(sale.payments || []).map(payment => `
+      <p style="display:flex;justify-content:space-between">
+        <span>${paymentMethodLabels[payment.method]}</span>
+        <strong>${money(payment.amount)}</strong>
+      </p>
+    `).join("")}
+    ${(sale.payments || [])
+      .filter(payment => payment.method === "CASH" && payment.changeAmount > 0)
+      .map(payment => `<p>Cambio: <strong>${money(payment.changeAmount)}</strong></p>`)
+      .join("")}
     <p style="text-align:center">Gracias por su visita</p>
   `;
 }
@@ -721,6 +858,16 @@ $("#quickAppointment").addEventListener("click", () => switchView("appointments"
 $("#appointmentSearch").addEventListener("input", renderAppointments);
 $("#clearCart").addEventListener("click", () => { cart = []; renderCart(); });
 $("#printShift").addEventListener("click", () => printBlock(shiftTicket()));
+$("#paymentMethod").addEventListener("change", updatePaymentFields);
+[
+  "cashReceived",
+  "mixedCash",
+  "mixedCashReceived",
+  "mixedCard",
+  "mixedTransfer"
+].forEach(fieldName => {
+  $("#saleForm")[fieldName].addEventListener("input", updatePaymentFields);
+});
 $("#cancelServiceEdit").addEventListener("click", resetServiceForm);
 $("#cancelBarberEdit").addEventListener("click", resetBarberForm);
 $("#cancelCustomerEdit").addEventListener("click", resetCustomerForm);
@@ -875,49 +1022,44 @@ $("#saleForm").addEventListener("submit", async event => {
   const form = event.currentTarget;
   try {
     const customer = await ensureCustomer(form.customer.value, form.phone.value);
-    const barber = catalogBarbers.find(item => item.id === form.barber.value);
-    const sale = {
-      id: crypto.randomUUID(),
-      date: todayISO(),
-      time: nowTime(),
-      customerId: customer?.id || null,
-      customer: form.customer.value.trim(),
-      phone: form.phone.value.trim(),
-      barberId: form.barber.value,
-      barber: barber?.name || form.barber.value,
-      payment: form.payment.value,
-      items: [...cart],
-      total: cart.reduce((sum, item) => sum + item.price, 0)
-    };
+    const total = getCartTotal();
+    const itemQuantities = new Map();
+    cart.forEach(item => {
+      itemQuantities.set(item.id, (itemQuantities.get(item.id) || 0) + 1);
+    });
+    const response = await fetch(`${API_BASE_URL}/sales`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        customer_id: customer ? Number(customer.id) : null,
+        barber_id: Number(form.barber.value),
+        appointment_id: pendingAppointmentId ? Number(pendingAppointmentId) : null,
+        discount: 0,
+        items: [...itemQuantities].map(([serviceId, quantity]) => ({
+          service_id: Number(serviceId),
+          quantity
+        })),
+        payments: buildPayments(form, total)
+      })
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.detail || "No fue posible registrar la venta");
+    }
+    const sale = mapSaleFromApi(await response.json());
 
-    state.sales.push(sale);
     cart = [];
     form.reset();
     form.customer.readOnly = false;
     delete form.customer.dataset.customerId;
-    saveState();
-
-    let appointmentCompleted = true;
-    if (pendingAppointmentId) {
-      try {
-        await updateAppointmentStatus(pendingAppointmentId, "COMPLETED");
-        await loadAppointmentsFromApi();
-      } catch (error) {
-        appointmentCompleted = false;
-        console.error(error);
-      }
-    }
     pendingAppointmentId = null;
+    await Promise.all([loadSalesFromApi(), loadAppointmentsFromApi()]);
     renderAll();
     printBlock(saleTicket(sale));
-    showToast(
-      appointmentCompleted
-        ? (customer ? "Venta y cliente guardados" : "Venta registrada")
-        : "Venta guardada; revisa el estado de la cita"
-    );
+    showToast(customer ? "Venta y cliente guardados" : "Venta registrada");
   } catch (error) {
     console.error(error);
-    showToast("No se pudo registrar la venta");
+    showToast(error.message || "No se pudo registrar la venta");
   }
 });
 
@@ -931,7 +1073,8 @@ async function initialize() {
       loadServicesFromApi(),
       loadBarbersFromApi(),
       loadCustomersFromApi(),
-      loadAppointmentsFromApi()
+      loadAppointmentsFromApi(),
+      loadSalesFromApi()
     ]);
     renderAll();
   } catch (error) {

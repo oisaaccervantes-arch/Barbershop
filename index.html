@@ -190,13 +190,43 @@
             <strong id="cartTotal">$0</strong>
           </div>
           <label>Metodo de pago
-            <select name="payment">
-              <option>Efectivo</option>
-              <option>Tarjeta</option>
-              <option>Transferencia</option>
-              <option>Mixto</option>
+            <select name="payment" id="paymentMethod">
+              <option value="CASH">Efectivo</option>
+              <option value="CARD">Tarjeta</option>
+              <option value="TRANSFER">Transferencia</option>
+              <option value="MIXED">Mixto</option>
             </select>
           </label>
+          <div id="cashPaymentFields">
+            <label>Efectivo recibido
+              <input name="cashReceived" min="0" step="0.01" inputmode="decimal"
+                type="number" placeholder="Igual al total">
+            </label>
+            <div class="payment-result">
+              <span>Cambio</span>
+              <strong id="cashChange">$0</strong>
+            </div>
+          </div>
+          <div class="hidden" id="mixedPaymentFields">
+            <div class="form-grid">
+              <label>En efectivo
+                <input name="mixedCash" min="0" step="0.01" value="0" type="number">
+              </label>
+              <label>Recibido
+                <input name="mixedCashReceived" min="0" step="0.01" type="number">
+              </label>
+              <label>En tarjeta
+                <input name="mixedCard" min="0" step="0.01" value="0" type="number">
+              </label>
+              <label>Transferencia
+                <input name="mixedTransfer" min="0" step="0.01" value="0" type="number">
+              </label>
+            </div>
+            <div class="payment-result">
+              <span id="mixedPaymentStatus">Falta asignar</span>
+              <strong id="mixedPaymentRemaining">$0</strong>
+            </div>
+          </div>
           <button class="submit-button" type="submit">
             <span class="material-symbols-outlined">print</span>
             Cobrar e imprimir

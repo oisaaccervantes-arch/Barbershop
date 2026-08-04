@@ -404,6 +404,23 @@ td small { color: var(--muted); }
   background: white;
 }
 
+.payment-result {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: -4px 0 14px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.payment-result strong {
+  color: var(--ink);
+  font-size: 18px;
+}
+
 .price-item.inactive {
   opacity: .58;
   background: var(--surface);

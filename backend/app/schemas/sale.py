@@ -1,0 +1,70 @@
+from datetime import datetime
+from decimal import Decimal
+from enum import Enum
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
+
+class PaymentMethod(str, Enum):
+    cash = "CASH"
+    card = "CARD"
+    transfer = "TRANSFER"
+
+
+class SaleItemCreate(BaseModel):
+    service_id: int
+    quantity: int = Field(default=1, gt=0)
+
+
+class PaymentCreate(BaseModel):
+    method: PaymentMethod
+    amount: Decimal = Field(gt=0, max_digits=10, decimal_places=2)
+    tendered_amount: Decimal | None = Field(
+        default=None, ge=0, max_digits=10, decimal_places=2
+    )
+
+
+class SaleCreate(BaseModel):
+    customer_id: int | None = None
+    barber_id: int
+    appointment_id: int | None = None
+    discount: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=2)
+    items: list[SaleItemCreate] = Field(min_length=1)
+    payments: list[PaymentCreate] = Field(min_length=1)
+
+
+class SaleItemRead(BaseModel):
+    id: int
+    service_id: int
+    service_name: str
+    service_type: str
+    quantity: int
+    unit_price: Decimal
+    line_total: Decimal
+
+
+class PaymentRead(BaseModel):
+    id: int
+    method: PaymentMethod
+    amount: Decimal
+    tendered_amount: Decimal | None
+    change_amount: Decimal | None
+
+
+class SaleRead(BaseModel):
+    id: int
+    folio: UUID
+    customer_id: int | None
+    customer_name: str | None
+    barber_id: int
+    barber_name: str
+    appointment_id: int | None
+    subtotal: Decimal
+    discount: Decimal
+    total: Decimal
+    status: str
+    sold_at: datetime
+    items: list[SaleItemRead]
+    payments: list[PaymentRead]
+
