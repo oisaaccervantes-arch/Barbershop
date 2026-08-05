@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class CustomerBase(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     phone: str = Field(pattern=r"^\d{10}$")
+    birth_date: date | None = None
     notes: str | None = Field(default=None, max_length=500)
     active: bool = True
 

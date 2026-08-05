@@ -45,6 +45,7 @@ def serialize_appointment(appointment: Appointment) -> dict:
         "customer_id": appointment.customer_id,
         "customer_name": appointment.customer.name,
         "customer_phone": appointment.customer.phone,
+        "customer_birth_date": appointment.customer.birth_date,
         "barber_id": appointment.barber_id,
         "barber_name": appointment.barber.name,
         "service_id": appointment.service_id,

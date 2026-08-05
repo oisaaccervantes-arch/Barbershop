@@ -1,5 +1,7 @@
+from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -31,6 +33,7 @@ def serialize_sale(sale: Sale) -> dict:
         "appointment_id": sale.appointment_id,
         "subtotal": sale.subtotal,
         "discount": sale.discount,
+        "discount_reason": sale.discount_reason,
         "total": sale.total,
         "status": sale.status,
         "sold_at": sale.sold_at,
@@ -121,6 +124,25 @@ def create_sale(payload: SaleCreate, db: DatabaseSession):
 
     subtotal = subtotal.quantize(MONEY_UNIT)
     discount = payload.discount.quantize(MONEY_UNIT)
+    discount_reason = None
+    if payload.birthday_service_id is not None:
+        if customer is None or customer.birth_date is None:
+            raise HTTPException(status_code=400, detail="El cliente no tiene fecha de nacimiento")
+        today = datetime.now(ZoneInfo("America/Hermosillo")).date()
+        if (customer.birth_date.month, customer.birth_date.day) != (today.month, today.day):
+            raise HTTPException(status_code=400, detail="El cliente no cumple aÃ±os hoy")
+        birthday_item = next(
+            (item for item in item_rows if item.service_id == payload.birthday_service_id),
+            None,
+        )
+        if birthday_item is None:
+            raise HTTPException(status_code=400, detail="El servicio del descuento no estÃ¡ en la venta")
+        expected_discount = (birthday_item.unit_price / 2).quantize(MONEY_UNIT)
+        if discount != expected_discount:
+            raise HTTPException(status_code=400, detail="El descuento de cumpleaÃ±os no es vÃ¡lido")
+        discount_reason = "BIRTHDAY"
+    elif discount != 0:
+        raise HTTPException(status_code=400, detail="El descuento requiere una razÃ³n vÃ¡lida")
     if discount > subtotal:
         raise HTTPException(status_code=400, detail="El descuento supera el subtotal")
     total = (subtotal - discount).quantize(MONEY_UNIT)
@@ -170,6 +192,7 @@ def create_sale(payload: SaleCreate, db: DatabaseSession):
         appointment_id=payload.appointment_id,
         subtotal=subtotal,
         discount=discount,
+        discount_reason=discount_reason,
         total=total,
         status="COMPLETED",
         items=item_rows,

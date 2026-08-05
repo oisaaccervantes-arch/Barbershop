@@ -421,6 +421,22 @@ td small { color: var(--muted); }
   font-size: 18px;
 }
 
+.birthday-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 13px;
+  border: 1px solid #e0b84f;
+  border-radius: 7px;
+  background: #fff4c9;
+  color: #5c4310;
+}
+
+.birthday-discount {
+  color: #8a5b00;
+  font-weight: 800;
+}
+
 .price-item.inactive {
   opacity: .58;
   background: var(--surface);
@@ -435,6 +451,13 @@ td small { color: var(--muted); }
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.report-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
   gap: 12px;
   margin-bottom: 18px;
 }
@@ -501,6 +524,10 @@ td small { color: var(--muted); }
 
   .summary-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .report-filters {
+    grid-template-columns: 1fr;
   }
 }
 

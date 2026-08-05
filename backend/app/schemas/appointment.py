@@ -31,6 +31,7 @@ class AppointmentRead(BaseModel):
     customer_id: int
     customer_name: str
     customer_phone: str
+    customer_birth_date: date | None
     barber_id: int
     barber_name: str
     service_id: int
@@ -41,4 +42,3 @@ class AppointmentRead(BaseModel):
     status: AppointmentStatus
     created_at: datetime
     updated_at: datetime
-

@@ -45,6 +45,7 @@ let catalogBarbers = [];
 let catalogCustomers = [];
 let pendingAppointmentId = null;
 let appointmentView = "active";
+let birthdayDiscountServiceId = null;
 
 const appointmentStatusFromApi = {
   PENDING: "pendiente",
@@ -73,9 +74,41 @@ const moneyFormatter = new Intl.NumberFormat("es-MX", {
   maximumFractionDigits: 2
 });
 const money = value => moneyFormatter.format(Number(value));
+
+function formatBirthDate(isoDate) {
+  if (!isoDate) return "";
+  const [year, month, day] = isoDate.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+function parseBirthDate(value) {
+  const text = value.trim();
+  if (!text) return null;
+  const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) throw new Error("La fecha de nacimiento debe escribirse como DD/MM/AAAA");
+  const [, day, month, year] = match;
+  const candidate = new Date(`${year}-${month}-${day}T12:00:00`);
+  if (
+    Number.isNaN(candidate.getTime())
+    || candidate.getFullYear() !== Number(year)
+    || candidate.getMonth() + 1 !== Number(month)
+    || candidate.getDate() !== Number(day)
+    || `${year}-${month}-${day}` > todayISO()
+  ) {
+    throw new Error("La fecha de nacimiento no es válida");
+  }
+  return `${year}-${month}-${day}`;
+}
 const dateToLocalISO = date =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const todayISO = () => dateToLocalISO(new Date());
+const currentWeekStartISO = () => {
+  const date = new Date();
+  const day = date.getDay();
+  const daysSinceMonday = day === 0 ? 6 : day - 1;
+  date.setDate(date.getDate() - daysSinceMonday);
+  return dateToLocalISO(date);
+};
 const nowTime = () => new Date().toTimeString().slice(0, 5);
 const escapeHtml = value => String(value)
   .replaceAll("&", "&amp;")
@@ -134,6 +167,7 @@ async function loadCustomersFromApi() {
     id: String(customer.id),
     name: customer.name,
     phone: customer.phone || "",
+    birthDate: customer.birth_date || "",
     notes: customer.notes || "",
     active: customer.active
   }));
@@ -150,6 +184,7 @@ async function loadAppointmentsFromApi() {
     customerId: String(appointment.customer_id),
     customer: appointment.customer_name,
     phone: appointment.customer_phone,
+    birthDate: appointment.customer_birth_date || "",
     date: appointment.appointment_date,
     time: appointment.appointment_time.slice(0, 5),
     barberId: String(appointment.barber_id),
@@ -178,6 +213,8 @@ function mapSaleFromApi(sale) {
     barberId: String(sale.barber_id),
     barber: sale.barber_name,
     appointmentId: sale.appointment_id ? String(sale.appointment_id) : null,
+    discount: Number(sale.discount || 0),
+    discountReason: sale.discount_reason || null,
     payment: sale.payments.length > 1
       ? "Mixto"
       : paymentMethodLabels[sale.payments[0]?.method] || "Sin pago",
@@ -220,9 +257,10 @@ async function updateAppointmentStatus(appointmentId, status) {
   if (!response.ok) throw new Error("No fue posible actualizar la cita");
 }
 
-async function ensureCustomer(name, phone) {
+async function ensureCustomer(name, phone, birthDate = "") {
   const normalizedName = name.trim();
   const normalizedPhone = phone.trim();
+  const normalizedBirthDate = parseBirthDate(birthDate);
   if (!normalizedName && !normalizedPhone) return null;
   if (normalizedPhone.length !== 10) {
     throw new Error("El teléfono debe tener 10 dígitos");
@@ -245,6 +283,22 @@ async function ensureCustomer(name, phone) {
       await loadCustomersFromApi();
       return catalogCustomers.find(customer => customer.id === existingCustomer.id);
     }
+    if (normalizedBirthDate && normalizedBirthDate !== existingCustomer.birthDate) {
+      const response = await fetch(`${API_BASE_URL}/customers/${existingCustomer.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: existingCustomer.name,
+          phone: existingCustomer.phone,
+          birth_date: normalizedBirthDate,
+          notes: existingCustomer.notes || null,
+          active: true
+        })
+      });
+      if (!response.ok) throw new Error("No fue posible guardar la fecha de nacimiento");
+      await loadCustomersFromApi();
+      return catalogCustomers.find(customer => customer.id === existingCustomer.id);
+    }
     return existingCustomer;
   }
   if (!normalizedName) {
@@ -257,6 +311,7 @@ async function ensureCustomer(name, phone) {
     body: JSON.stringify({
       name: normalizedName,
       phone: normalizedPhone || null,
+      birth_date: normalizedBirthDate,
       notes: null,
       active: true
     })
@@ -269,6 +324,7 @@ async function ensureCustomer(name, phone) {
     id: String(customer.id),
     name: customer.name,
     phone: customer.phone || "",
+    birthDate: customer.birth_date || "",
     notes: customer.notes || "",
     active: customer.active
   };
@@ -311,20 +367,43 @@ function autofillCustomerByPhone(form) {
     form.customer.value = customer.name;
     form.customer.readOnly = true;
     form.customer.dataset.customerId = customer.id;
+    form.birthDate.value = formatBirthDate(customer.birthDate);
     showToast("Cliente encontrado");
   } else {
     if (form.customer.dataset.customerId) {
       form.customer.value = "";
       delete form.customer.dataset.customerId;
+      form.birthDate.value = "";
     }
     form.customer.readOnly = false;
   }
+  if (form.id === "saleForm") {
+    birthdayDiscountServiceId = null;
+    renderCart();
+  }
+}
+
+function isBirthdayOn(birthDate, targetDate = todayISO()) {
+  if (!birthDate || !targetDate) return false;
+  return birthDate.slice(5) === targetDate.slice(5);
+}
+
+function currentSaleCustomer() {
+  const form = $("#saleForm");
+  return catalogCustomers.find(customer =>
+    customer.active && customer.phone === form.phone.value.trim()
+  );
 }
 
 const roundMoney = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
-const getCartTotal = () => roundMoney(
+const getCartSubtotal = () => roundMoney(
   cart.reduce((sum, item) => sum + Number(item.price), 0)
 );
+const getBirthdayDiscount = () => {
+  const item = cart.find(entry => String(entry.id) === String(birthdayDiscountServiceId));
+  return item ? roundMoney(Number(item.price) / 2) : 0;
+};
+const getCartTotal = () => roundMoney(getCartSubtotal() - getBirthdayDiscount());
 
 function updatePaymentFields() {
   const form = $("#saleForm");
@@ -413,6 +492,18 @@ function renderSelects() {
       `<option value="${escapeHtml(customer.phone)}">${escapeHtml(customer.name)}</option>`
     )
     .join("");
+
+  const barberFilter = $("#salesBarberFilter");
+  const selectedBarber = barberFilter.value || "ALL";
+  barberFilter.innerHTML = `
+    <option value="ALL">Todos los barberos</option>
+    ${catalogBarbers.map(barber =>
+      `<option value="${barber.id}">${escapeHtml(barber.name)}${barber.active ? "" : " (inactivo)"}</option>`
+    ).join("")}
+  `;
+  if ([...barberFilter.options].some(option => option.value === selectedBarber)) {
+    barberFilter.value = selectedBarber;
+  }
 }
 
 function renderShell() {
@@ -442,7 +533,7 @@ function renderAppointments() {
     .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
     .map(item => `
       <tr>
-        <td><strong>${item.customer}</strong><small>${item.phone || "Sin telefono"}</small></td>
+        <td><strong>${item.customer}</strong>${isBirthdayOn(item.birthDate, item.date) ? ` <span title="Cumpleaños">🎂</span>` : ""}<small>${item.phone || "Sin telefono"}</small></td>
         <td>${item.serviceName}<br><small>${money(item.price)}</small></td>
         <td>${item.barber}</td>
         <td>${item.date}<br><small>${item.time}</small></td>
@@ -531,7 +622,7 @@ function renderCustomers() {
     <div class="price-item ${customer.active ? "" : "inactive"}">
       <div>
         <strong>${escapeHtml(customer.name)}</strong>
-        <span>${escapeHtml(customer.phone || "Sin teléfono")} · ${customer.active ? "Activo" : "Inactivo"}</span>
+        <span>${escapeHtml(customer.phone || "Sin teléfono")} · ${formatBirthDate(customer.birthDate) || "Sin fecha de nacimiento"} · ${customer.active ? "Activo" : "Inactivo"}</span>
       </div>
       <div class="catalog-actions">
         <button class="chip-button" type="button" data-edit-customer="${customer.id}">Editar</button>
@@ -545,6 +636,13 @@ function renderCustomers() {
 }
 
 function renderCart() {
+  const birthdayCustomer = currentSaleCustomer();
+  const canUseBirthdayDiscount = Boolean(
+    birthdayCustomer && isBirthdayOn(birthdayCustomer.birthDate)
+  );
+  if (!canUseBirthdayDiscount) birthdayDiscountServiceId = null;
+  $("#birthdayNotice").classList.toggle("hidden", !canUseBirthdayDiscount);
+
   if (!cart.length) {
     $("#cartItems").innerHTML = `<div class="cart-empty">Selecciona servicios para cobrar.</div>`;
   } else {
@@ -553,6 +651,12 @@ function renderCart() {
         <div>
           <strong>${item.name}</strong>
           <span>${money(item.price)}</span>
+          ${canUseBirthdayDiscount ? `
+            <button class="chip-button ${String(item.id) === String(birthdayDiscountServiceId) ? "pay" : ""}"
+              type="button" data-birthday-discount="${item.id}">
+              ${String(item.id) === String(birthdayDiscountServiceId) ? "50 % aplicado" : "Aplicar 50 %"}
+            </button>
+          ` : ""}
         </div>
         <button class="icon-button" type="button" data-remove="${index}" title="Quitar">
           <span class="material-symbols-outlined">close</span>
@@ -561,7 +665,10 @@ function renderCart() {
     `).join("");
   }
 
-  $("#cartTotal").textContent = money(cart.reduce((sum, item) => sum + item.price, 0));
+  const discount = getBirthdayDiscount();
+  $("#cartTotal").innerHTML = discount
+    ? `<span class="birthday-discount">-${money(discount)}</span> ${money(getCartTotal())}`
+    : money(getCartTotal());
   updatePaymentFields();
 }
 
@@ -605,6 +712,67 @@ function renderShift() {
   `).join("") || `<tr><td colspan="6">Todavia no hay ventas en este turno.</td></tr>`;
 }
 
+function renderSalesReport() {
+  const dateFrom = $("#salesDateFrom").value;
+  const dateTo = $("#salesDateTo").value;
+  const barberId = $("#salesBarberFilter").value;
+  const query = $("#salesSearch").value.trim().toLowerCase();
+  const sales = state.sales
+    .filter(sale => !dateFrom || sale.date >= dateFrom)
+    .filter(sale => !dateTo || sale.date <= dateTo)
+    .filter(sale => barberId === "ALL" || sale.barberId === barberId)
+    .filter(sale => {
+      const searchableText = [
+        sale.folio,
+        sale.customer || "Público general",
+        sale.barber,
+        sale.payment,
+        ...sale.items.map(item => item.name)
+      ].join(" ").toLowerCase();
+      return searchableText.includes(query);
+    })
+    .sort((a, b) =>
+      `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)
+    );
+
+  const paymentTotal = method => sales.reduce(
+    (sum, sale) => sum + (sale.payments || [])
+      .filter(payment => payment.method === method)
+      .reduce((paymentSum, payment) => paymentSum + payment.amount, 0),
+    0
+  );
+  const total = sales.reduce((sum, sale) => sum + sale.total, 0);
+
+  $("#salesReportSummary").innerHTML = [
+    ["Total", money(total)],
+    ["Efectivo", money(paymentTotal("CASH"))],
+    ["Tarjeta", money(paymentTotal("CARD"))],
+    ["Transferencia", money(paymentTotal("TRANSFER"))],
+    ["Ventas", sales.length]
+  ].map(([label, value]) =>
+    `<div class="summary-card"><span>${label}</span><strong>${value}</strong></div>`
+  ).join("");
+
+  $("#salesReportRows").innerHTML = sales.map(sale => `
+    <tr>
+      <td>${sale.date}<br><small>${sale.time}</small></td>
+      <td><strong>${escapeHtml((sale.folio || sale.id).slice(0, 8).toUpperCase())}</strong></td>
+      <td>${escapeHtml(sale.customer || "Público general")}</td>
+      <td>${sale.items.map(item =>
+        `${item.quantity > 1 ? `${item.quantity} × ` : ""}${escapeHtml(item.name)}`
+      ).join("<br>")}</td>
+      <td>${escapeHtml(sale.barber)}</td>
+      <td>${escapeHtml(sale.payment)}</td>
+      <td><strong>${money(sale.total)}</strong></td>
+      <td>
+        <button class="chip-button" type="button" data-reprint-sale="${sale.id}">
+          Reimprimir
+        </button>
+      </td>
+    </tr>
+  `).join("") || `<tr><td colspan="8">No hay ventas en el periodo seleccionado.</td></tr>`;
+}
+
 function renderAll() {
   renderSelects();
   renderShell();
@@ -614,6 +782,7 @@ function renderAll() {
   renderCustomers();
   renderCart();
   renderShift();
+  renderSalesReport();
 }
 
 function switchView(view) {
@@ -625,6 +794,7 @@ function switchView(view) {
     services: "Catálogo",
     barbers: "Barberos",
     customers: "Clientes",
+    sales: "Ventas",
     shift: "Corte de turno"
   };
   $("#viewTitle").textContent = titles[view] || view;
@@ -646,6 +816,7 @@ function saleTicket(sale) {
     <hr>
     <p>Folio: ${(sale.folio || sale.id).slice(0, 8).toUpperCase()}<br>Fecha: ${sale.date} ${sale.time}<br>Barbero: ${sale.barber}</p>
     <p>Cliente: ${sale.customer || "Publico general"}</p>
+    ${sale.discount ? `<p>Descuento de cumpleaños: <strong>-${money(sale.discount)}</strong></p>` : ""}
     <hr>
     ${sale.items.map(item => `<p style="display:flex;justify-content:space-between"><span>${item.quantity > 1 ? `${item.quantity} × ` : ""}${item.name}</span><strong>${money(item.price * (item.quantity || 1))}</strong></p>`).join("")}
     <hr>
@@ -696,6 +867,12 @@ document.addEventListener("click", async event => {
     renderAppointments();
   }
 
+  const reprintSale = event.target.closest("[data-reprint-sale]");
+  if (reprintSale) {
+    const sale = state.sales.find(item => item.id === reprintSale.dataset.reprintSale);
+    if (sale) printBlock(saleTicket(sale));
+  }
+
   const serviceButton = event.target.closest("[data-service]");
   if (serviceButton) {
     const service = state.services.find(item => item.id === serviceButton.dataset.service);
@@ -706,6 +883,15 @@ document.addEventListener("click", async event => {
   const remove = event.target.closest("[data-remove]");
   if (remove) {
     cart.splice(Number(remove.dataset.remove), 1);
+    renderCart();
+  }
+
+  const birthdayDiscount = event.target.closest("[data-birthday-discount]");
+  if (birthdayDiscount) {
+    const serviceId = birthdayDiscount.dataset.birthdayDiscount;
+    birthdayDiscountServiceId = String(birthdayDiscountServiceId) === serviceId
+      ? null
+      : serviceId;
     renderCart();
   }
 
@@ -791,6 +977,7 @@ document.addEventListener("click", async event => {
       form.customerId.value = customer.id;
       form.name.value = customer.name;
       form.phone.value = customer.phone;
+      form.birthDate.value = formatBirthDate(customer.birthDate);
       form.notes.value = customer.notes;
       $("#customerFormTitle").textContent = "Editar cliente";
       $("#customerSubmitLabel").textContent = "Guardar cambios";
@@ -841,6 +1028,7 @@ document.addEventListener("click", async event => {
         cart = [{ id: appointment.serviceId, name: appointment.serviceName, price: appointment.price }];
         $("#saleForm").customer.value = appointment.customer;
         $("#saleForm").phone.value = appointment.phone || "";
+        $("#saleForm").birthDate.value = formatBirthDate(appointment.birthDate);
         $("#saleForm").customer.readOnly = true;
         $("#saleForm").barber.value = appointment.barberId;
         pendingAppointmentId = appointment.id;
@@ -856,7 +1044,11 @@ document.addEventListener("click", async event => {
 
 $("#quickAppointment").addEventListener("click", () => switchView("appointments"));
 $("#appointmentSearch").addEventListener("input", renderAppointments);
-$("#clearCart").addEventListener("click", () => { cart = []; renderCart(); });
+$("#clearCart").addEventListener("click", () => {
+  cart = [];
+  birthdayDiscountServiceId = null;
+  renderCart();
+});
 $("#printShift").addEventListener("click", () => printBlock(shiftTicket()));
 $("#paymentMethod").addEventListener("change", updatePaymentFields);
 [
@@ -872,18 +1064,34 @@ $("#cancelServiceEdit").addEventListener("click", resetServiceForm);
 $("#cancelBarberEdit").addEventListener("click", resetBarberForm);
 $("#cancelCustomerEdit").addEventListener("click", resetCustomerForm);
 $("#customerSearch").addEventListener("input", renderCustomers);
+$("#salesDateFrom").addEventListener("change", renderSalesReport);
+$("#salesDateTo").addEventListener("change", renderSalesReport);
+$("#salesBarberFilter").addEventListener("change", renderSalesReport);
+$("#salesSearch").addEventListener("input", renderSalesReport);
 $("#appointmentForm").phone.addEventListener("input", () =>
   autofillCustomerByPhone($("#appointmentForm"))
 );
 $("#saleForm").phone.addEventListener("input", () =>
   autofillCustomerByPhone($("#saleForm"))
 );
+document.querySelectorAll('input[name="birthDate"]').forEach(input => {
+  input.addEventListener("input", () => {
+    const digits = input.value.replace(/\D/g, "").slice(0, 8);
+    input.value = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)]
+      .filter(Boolean)
+      .join("/");
+  });
+});
 
 $("#appointmentForm").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.currentTarget;
   try {
-    const customer = await ensureCustomer(form.customer.value, form.phone.value);
+    const customer = await ensureCustomer(
+      form.customer.value,
+      form.phone.value,
+      form.birthDate.value
+    );
     const response = await fetch(`${API_BASE_URL}/appointments`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -908,7 +1116,7 @@ $("#appointmentForm").addEventListener("submit", async event => {
     showToast("Cita guardada");
   } catch (error) {
     console.error(error);
-    showToast("No se pudo registrar la cita");
+    showToast(error.message || "No se pudo registrar la cita");
   }
 });
 
@@ -995,6 +1203,7 @@ $("#customerForm").addEventListener("submit", async event => {
         body: JSON.stringify({
           name: form.name.value.trim(),
           phone: form.phone.value.trim() || null,
+          birth_date: parseBirthDate(form.birthDate.value),
           notes: form.notes.value.trim() || null,
           active: currentCustomer?.active ?? true
         })
@@ -1008,7 +1217,7 @@ $("#customerForm").addEventListener("submit", async event => {
     showToast(customerId ? "Cliente actualizado" : "Cliente agregado");
   } catch (error) {
     console.error(error);
-    showToast("No se pudo guardar el cliente");
+    showToast(error.message || "No se pudo guardar el cliente");
   }
 });
 
@@ -1021,8 +1230,13 @@ $("#saleForm").addEventListener("submit", async event => {
 
   const form = event.currentTarget;
   try {
-    const customer = await ensureCustomer(form.customer.value, form.phone.value);
+    const customer = await ensureCustomer(
+      form.customer.value,
+      form.phone.value,
+      form.birthDate.value
+    );
     const total = getCartTotal();
+    const birthdayDiscount = getBirthdayDiscount();
     const itemQuantities = new Map();
     cart.forEach(item => {
       itemQuantities.set(item.id, (itemQuantities.get(item.id) || 0) + 1);
@@ -1034,7 +1248,10 @@ $("#saleForm").addEventListener("submit", async event => {
         customer_id: customer ? Number(customer.id) : null,
         barber_id: Number(form.barber.value),
         appointment_id: pendingAppointmentId ? Number(pendingAppointmentId) : null,
-        discount: 0,
+        discount: birthdayDiscount,
+        birthday_service_id: birthdayDiscountServiceId
+          ? Number(birthdayDiscountServiceId)
+          : null,
         items: [...itemQuantities].map(([serviceId, quantity]) => ({
           service_id: Number(serviceId),
           quantity
@@ -1049,6 +1266,7 @@ $("#saleForm").addEventListener("submit", async event => {
     const sale = mapSaleFromApi(await response.json());
 
     cart = [];
+    birthdayDiscountServiceId = null;
     form.reset();
     form.customer.readOnly = false;
     delete form.customer.dataset.customerId;
@@ -1066,6 +1284,8 @@ $("#saleForm").addEventListener("submit", async event => {
 async function initialize() {
   $("#appointmentForm").date.value = todayISO();
   $("#appointmentForm").time.value = nowTime();
+  $("#salesDateFrom").value = currentWeekStartISO();
+  $("#salesDateTo").value = todayISO();
   renderAll();
 
   try {

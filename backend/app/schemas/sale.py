@@ -30,6 +30,7 @@ class SaleCreate(BaseModel):
     barber_id: int
     appointment_id: int | None = None
     discount: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=2)
+    birthday_service_id: int | None = None
     items: list[SaleItemCreate] = Field(min_length=1)
     payments: list[PaymentCreate] = Field(min_length=1)
 
@@ -62,9 +63,9 @@ class SaleRead(BaseModel):
     appointment_id: int | None
     subtotal: Decimal
     discount: Decimal
+    discount_reason: str | None
     total: Decimal
     status: str
     sold_at: datetime
     items: list[SaleItemRead]
     payments: list[PaymentRead]
-

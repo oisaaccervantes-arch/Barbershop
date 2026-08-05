@@ -47,6 +47,7 @@ class Sale(Base):
     discount: Mapped[Decimal] = mapped_column(
         Numeric(10, 2), nullable=False, default=0, server_default="0"
     )
+    discount_reason: Mapped[str | None] = mapped_column(String(30))
     total: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="COMPLETED", server_default="COMPLETED"
@@ -128,4 +129,3 @@ class Payment(Base):
     change_amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
 
     sale = relationship("Sale", back_populates="payments")
-

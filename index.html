@@ -43,6 +43,10 @@
         <span class="material-symbols-outlined"></span>
         Clientes
       </button>
+      <button class="nav-item" data-view="sales">
+        <span class="material-symbols-outlined"></span>
+        Ventas
+      </button>
       <button class="nav-item" data-view="shift">
         <span class="material-symbols-outlined"></span>
         Corte de turno
@@ -93,6 +97,10 @@
           </label>
           <label>Cliente
             <input name="customer" placeholder="Se completa si el teléfono ya existe" required>
+          </label>
+          <label>Fecha de nacimiento (opcional)
+            <input name="birthDate" inputmode="numeric" maxlength="10"
+              placeholder="DD/MM/AAAA" title="Escribe la fecha como DD/MM/AAAA">
           </label>
           <div class="form-grid">
             <label>Fecha
@@ -181,6 +189,14 @@
           <label>Cliente
             <input name="customer" placeholder="Se completa si el teléfono ya existe">
           </label>
+          <label>Fecha de nacimiento (opcional)
+            <input name="birthDate" inputmode="numeric" maxlength="10"
+              placeholder="DD/MM/AAAA" title="Escribe la fecha como DD/MM/AAAA">
+          </label>
+          <div class="birthday-notice hidden" id="birthdayNotice">
+            <strong>🎂 Cumpleaños del cliente</strong>
+            <span>Puede aplicarse 50 % a un servicio.</span>
+          </div>
           <label>Barbero
             <select name="barber" required></select>
           </label>
@@ -329,6 +345,10 @@
           <label>Nombre
             <input name="name" placeholder="Nombre del cliente" required>
           </label>
+          <label>Fecha de nacimiento (opcional)
+            <input name="birthDate" inputmode="numeric" maxlength="10"
+              placeholder="DD/MM/AAAA" title="Escribe la fecha como DD/MM/AAAA">
+          </label>
           <label>Notas
             <textarea name="notes" maxlength="500" placeholder="Preferencias u observaciones"></textarea>
           </label>
@@ -350,6 +370,54 @@
             <input class="search" id="customerSearch" placeholder="Buscar nombre o teléfono">
           </div>
           <div class="price-list" id="customerList"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="sales">
+      <div class="workspace">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Historial</p>
+              <h3>Ventas por periodo</h3>
+            </div>
+          </div>
+
+          <div class="report-filters">
+            <label>Desde
+              <input id="salesDateFrom" type="date">
+            </label>
+            <label>Hasta
+              <input id="salesDateTo" type="date">
+            </label>
+            <label>Barbero
+              <select id="salesBarberFilter"></select>
+            </label>
+            <label>Buscar
+              <input id="salesSearch" placeholder="Folio, cliente o servicio">
+            </label>
+          </div>
+
+          <div class="summary-grid" id="salesReportSummary"></div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Folio</th>
+                  <th>Cliente</th>
+                  <th>Servicios</th>
+                  <th>Barbero</th>
+                  <th>Pago</th>
+                  <th>Total</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="salesReportRows"></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </section>
