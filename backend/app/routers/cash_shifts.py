@@ -1,0 +1,117 @@
+from datetime import datetime
+from typing import Annotated
+from zoneinfo import ZoneInfo
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session, joinedload, selectinload
+
+from app.database import get_db
+from app.models.barber import Barber
+from app.models.cash_shift import CashShift, ShiftBarber, ShiftExpense
+from app.models.sale import Sale
+from app.schemas.cash_shift import CashShiftClose, CashShiftCreate, CashShiftRead, ShiftExpenseCreate, ShiftExpenseRead
+
+
+router = APIRouter(prefix="/api/shifts", tags=["shifts"])
+DatabaseSession = Annotated[Session, Depends(get_db)]
+LOCAL_ZONE = ZoneInfo("America/Hermosillo")
+MAX_RECEIPT_NUMBER = 10_000
+
+
+def next_receipt_number(db: Session) -> int:
+    last_number = db.scalar(
+        select(Sale.receipt_number)
+        .where(Sale.receipt_number.is_not(None))
+        .order_by(Sale.sold_at.desc(), Sale.id.desc())
+        .limit(1)
+    )
+    return 0 if last_number is None or last_number >= MAX_RECEIPT_NUMBER else last_number + 1
+
+
+def shift_query():
+    return select(CashShift).options(
+        joinedload(CashShift.barbers).joinedload(ShiftBarber.barber),
+        selectinload(CashShift.expenses),
+    )
+
+
+def serialize_shift(shift: CashShift, db: Session) -> dict:
+    return {
+        "id": shift.id,
+        "business_date": shift.business_date,
+        "shift_type": shift.shift_type,
+        "status": shift.status,
+        "opening_cash": shift.opening_cash,
+        "opened_at": shift.opened_at,
+        "closed_at": shift.closed_at,
+        "cash_counted": shift.cash_counted,
+        "card_reported": shift.card_reported,
+        "transfer_reported": shift.transfer_reported,
+        "next_receipt_number": next_receipt_number(db),
+        "barbers": [{"id": row.barber.id, "name": row.barber.name} for row in shift.barbers],
+        "expenses": [
+            {"id": expense.id, "concept": expense.concept, "amount": expense.amount, "created_at": expense.created_at}
+            for expense in shift.expenses
+        ],
+    }
+
+
+@router.get("/current", response_model=CashShiftRead | None)
+def get_current_shift(db: DatabaseSession):
+    shift = db.scalar(shift_query().where(CashShift.status == "OPEN").order_by(CashShift.id.desc()))
+    return serialize_shift(shift, db) if shift else None
+
+
+@router.get("", response_model=list[CashShiftRead])
+def list_shifts(db: DatabaseSession):
+    shifts = db.scalars(shift_query().order_by(CashShift.opened_at.desc(), CashShift.id.desc()))
+    return [serialize_shift(shift, db) for shift in shifts.unique().all()]
+
+
+@router.post("", response_model=CashShiftRead, status_code=status.HTTP_201_CREATED)
+def open_shift(payload: CashShiftCreate, db: DatabaseSession):
+    if db.scalar(select(CashShift.id).where(CashShift.status == "OPEN").limit(1)):
+        raise HTTPException(status_code=409, detail="Ya existe un turno abierto")
+    barber_ids = list(dict.fromkeys(payload.barber_ids))
+    barbers = db.scalars(select(Barber).where(Barber.id.in_(barber_ids), Barber.active.is_(True))).all()
+    if len(barbers) != len(barber_ids):
+        raise HTTPException(status_code=400, detail="Uno de los barberos no existe o está inactivo")
+    shift = CashShift(
+        business_date=datetime.now(LOCAL_ZONE).date(),
+        shift_type=payload.shift_type.value,
+        opening_cash=payload.opening_cash,
+        barbers=[ShiftBarber(barber_id=barber.id) for barber in barbers],
+    )
+    db.add(shift)
+    db.commit()
+    saved = db.scalar(shift_query().where(CashShift.id == shift.id))
+    return serialize_shift(saved, db)
+
+
+@router.post("/{shift_id}/expenses", response_model=ShiftExpenseRead, status_code=status.HTTP_201_CREATED)
+def add_expense(shift_id: int, payload: ShiftExpenseCreate, db: DatabaseSession):
+    shift = db.get(CashShift, shift_id)
+    if shift is None or shift.status != "OPEN":
+        raise HTTPException(status_code=400, detail="El turno no está abierto")
+    concept = " ".join(payload.concept.split())
+    expense = ShiftExpense(shift_id=shift.id, concept=concept, amount=payload.amount)
+    db.add(expense)
+    db.commit()
+    db.refresh(expense)
+    return expense
+
+
+@router.post("/{shift_id}/close", response_model=CashShiftRead)
+def close_shift(shift_id: int, payload: CashShiftClose, db: DatabaseSession):
+    shift = db.get(CashShift, shift_id)
+    if shift is None or shift.status != "OPEN":
+        raise HTTPException(status_code=400, detail="El turno no está abierto")
+    shift.cash_counted = payload.cash_counted
+    shift.card_reported = payload.card_reported
+    shift.transfer_reported = payload.transfer_reported
+    shift.status = "CLOSED"
+    shift.closed_at = datetime.now(LOCAL_ZONE)
+    db.commit()
+    saved = db.scalar(shift_query().where(CashShift.id == shift.id))
+    return serialize_shift(saved, db)

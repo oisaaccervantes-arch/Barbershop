@@ -11,6 +11,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Uuid,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -24,6 +25,8 @@ class Sale(Base):
         CheckConstraint("subtotal >= 0", name="ck_sales_subtotal_nonnegative"),
         CheckConstraint("discount >= 0", name="ck_sales_discount_nonnegative"),
         CheckConstraint("total >= 0", name="ck_sales_total_nonnegative"),
+        CheckConstraint("receipt_number IS NULL OR (receipt_number >= 0 AND receipt_number <= 10000)", name="ck_sales_receipt_number_range"),
+        UniqueConstraint("shift_id", "receipt_number", name="uq_sales_shift_receipt_number"),
         CheckConstraint(
             "status IN ('COMPLETED', 'CANCELLED')",
             name="ck_sales_status_valid",
@@ -43,6 +46,8 @@ class Sale(Base):
     appointment_id: Mapped[int | None] = mapped_column(
         ForeignKey("appointments.id", ondelete="RESTRICT"), unique=True
     )
+    shift_id: Mapped[int | None] = mapped_column(ForeignKey("cash_shifts.id", ondelete="RESTRICT"))
+    receipt_number: Mapped[int | None] = mapped_column(Integer)
     subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     discount: Mapped[Decimal] = mapped_column(
         Numeric(10, 2), nullable=False, default=0, server_default="0"
@@ -68,6 +73,7 @@ class Sale(Base):
     customer = relationship("Customer")
     barber = relationship("Barber")
     appointment = relationship("Appointment")
+    shift = relationship("CashShift", back_populates="sales")
     items = relationship(
         "SaleItem", back_populates="sale", cascade="all, delete-orphan"
     )

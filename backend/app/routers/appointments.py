@@ -1,4 +1,6 @@
+from datetime import datetime, timedelta
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -8,17 +10,71 @@ from app.database import get_db
 from app.models.appointment import Appointment
 from app.models.barber import Barber
 from app.models.customer import Customer
+from app.models.cash_shift import CashShift, ShiftBarber
 from app.models.service import Service
 from app.schemas.appointment import (
     AppointmentCreate,
     AppointmentRead,
     AppointmentStatus,
     AppointmentStatusUpdate,
+    AppointmentUpdate,
 )
 
 
 router = APIRouter(prefix="/api/appointments", tags=["appointments"])
 DatabaseSession = Annotated[Session, Depends(get_db)]
+APPOINTMENT_DURATION_MINUTES = 15
+
+
+def ensure_barber_is_available_for_open_shift(
+    db: Session, barber_id: int, appointment_date
+) -> None:
+    shift = db.scalar(
+        select(CashShift).where(
+            CashShift.status == "OPEN",
+            CashShift.business_date == appointment_date,
+        ).limit(1)
+    )
+    if shift is None:
+        return
+    assigned = db.scalar(
+        select(ShiftBarber.id).where(
+            ShiftBarber.shift_id == shift.id,
+            ShiftBarber.barber_id == barber_id,
+        ).limit(1)
+    )
+    if assigned is None:
+        raise HTTPException(
+            status_code=400,
+            detail="El barbero no está registrado en el turno de esa fecha",
+        )
+
+
+def has_schedule_conflict(
+    db: Session,
+    barber_id: int,
+    appointment_date,
+    appointment_time,
+    exclude_appointment_id: int | None = None,
+) -> bool:
+    statement = select(Appointment).where(
+        Appointment.barber_id == barber_id,
+        Appointment.appointment_date == appointment_date,
+        Appointment.status.in_([
+            AppointmentStatus.pending.value,
+            AppointmentStatus.confirmed.value,
+        ]),
+    )
+    if exclude_appointment_id is not None:
+        statement = statement.where(Appointment.id != exclude_appointment_id)
+    requested_start = datetime.combine(appointment_date, appointment_time)
+    requested_end = requested_start + timedelta(minutes=APPOINTMENT_DURATION_MINUTES)
+    return any(
+        requested_start < datetime.combine(item.appointment_date, item.appointment_time)
+        + timedelta(minutes=APPOINTMENT_DURATION_MINUTES)
+        and requested_end > datetime.combine(item.appointment_date, item.appointment_time)
+        for item in db.scalars(statement).all()
+    )
 
 
 def get_appointment_or_404(appointment_id: int, db: Session) -> Appointment:
@@ -54,6 +110,8 @@ def serialize_appointment(appointment: Appointment) -> dict:
         "appointment_time": appointment.appointment_time,
         "price": appointment.price,
         "status": appointment.status,
+        "cancellation_note": appointment.cancellation_note,
+        "cancelled_at": appointment.cancelled_at,
         "created_at": appointment.created_at,
         "updated_at": appointment.updated_at,
     }
@@ -92,6 +150,17 @@ def create_appointment(payload: AppointmentCreate, db: DatabaseSession):
         raise HTTPException(status_code=400, detail="El barbero no está activo")
     if service is None or not service.active:
         raise HTTPException(status_code=400, detail="El servicio no está activo")
+    ensure_barber_is_available_for_open_shift(
+        db, barber.id, payload.appointment_date
+    )
+
+    if has_schedule_conflict(
+        db, barber.id, payload.appointment_date, payload.appointment_time
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El barbero ya tiene una cita dentro de ese lapso de 15 minutos",
+        )
 
     appointment = Appointment(
         customer_id=customer.id,
@@ -103,6 +172,43 @@ def create_appointment(payload: AppointmentCreate, db: DatabaseSession):
         status=AppointmentStatus.pending.value,
     )
     db.add(appointment)
+    db.commit()
+    return serialize_appointment(get_appointment_or_404(appointment.id, db))
+
+
+@router.put("/{appointment_id}", response_model=AppointmentRead)
+def update_appointment(
+    appointment_id: int,
+    payload: AppointmentUpdate,
+    db: DatabaseSession,
+):
+    appointment = get_appointment_or_404(appointment_id, db)
+    if appointment.status not in {
+        AppointmentStatus.pending.value,
+        AppointmentStatus.confirmed.value,
+    }:
+        raise HTTPException(status_code=409, detail="Solo se pueden editar citas activas")
+    service = db.get(Service, payload.service_id)
+    if service is None or not service.active:
+        raise HTTPException(status_code=400, detail="El servicio no está activo")
+    ensure_barber_is_available_for_open_shift(
+        db, appointment.barber_id, payload.appointment_date
+    )
+    if has_schedule_conflict(
+        db,
+        appointment.barber_id,
+        payload.appointment_date,
+        payload.appointment_time,
+        exclude_appointment_id=appointment.id,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="El barbero ya tiene una cita dentro de ese lapso de 15 minutos",
+        )
+    appointment.service_id = service.id
+    appointment.appointment_date = payload.appointment_date
+    appointment.appointment_time = payload.appointment_time
+    appointment.price = service.price
     db.commit()
     return serialize_appointment(get_appointment_or_404(appointment.id, db))
 
@@ -123,6 +229,15 @@ def update_appointment_status(
             status_code=status.HTTP_409_CONFLICT,
             detail="La cita ya tiene un estado final",
         )
+    if payload.status == AppointmentStatus.cancelled:
+        cancellation_note = " ".join((payload.cancellation_note or "").split())
+        if not cancellation_note:
+            raise HTTPException(
+                status_code=400,
+                detail="Es necesario escribir el motivo de la cancelación",
+            )
+        appointment.cancellation_note = cancellation_note
+        appointment.cancelled_at = datetime.now(ZoneInfo("America/Hermosillo"))
     appointment.status = payload.status.value
     db.commit()
     db.refresh(appointment)

@@ -83,13 +83,14 @@
           <div class="panel-header">
             <div>
               <p class="eyebrow">Agenda</p>
-              <h3>Nueva cita</h3>
+              <h3 id="appointmentFormTitle">Nueva cita</h3>
             </div>
             <button class="icon-button" type="reset" title="Limpiar">
               <span class="material-symbols-outlined">refresh</span>
             </button>
           </div>
 
+          <input name="appointmentId" type="hidden">
           <label>Teléfono celular
             <input name="phone" list="customerPhoneOptions" inputmode="numeric" maxlength="10"
               pattern="[0-9]{10}" title="Ingresa exactamente 10 dígitos"
@@ -118,7 +119,10 @@
           </label>
           <button class="submit-button" type="submit">
             <span class="material-symbols-outlined">save</span>
-            Guardar cita
+            <span id="appointmentSubmitLabel">Guardar cita</span>
+          </button>
+          <button class="secondary-button hidden" id="cancelAppointmentEdit" type="button">
+            Cancelar edición
           </button>
         </form>
 
@@ -181,6 +185,10 @@
               <span class="material-symbols-outlined">delete</span>
             </button>
           </div>
+          <label>Folio de la nota
+            <input name="receiptNumber" type="number" inputmode="numeric"
+              min="0" max="10000" placeholder="Abre un turno" required>
+          </label>
           <label>Teléfono del cliente
             <input name="phone" list="customerPhoneOptions" inputmode="numeric" maxlength="10"
               pattern="[0-9]{10}" title="Ingresa exactamente 10 dígitos"
@@ -419,42 +427,190 @@
             </table>
           </div>
         </div>
+        <div class="panel cancellations-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Seguimiento</p>
+              <h3>Cancelaciones de citas</h3>
+              <p id="cancellationSummary">0 cancelaciones registradas</p>
+            </div>
+            <input class="search" id="cancellationSearch"
+              placeholder="Buscar cliente, barbero o motivo">
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Cancelada</th>
+                  <th>Cita programada</th>
+                  <th>Cliente</th>
+                  <th>Servicio</th>
+                  <th>Barbero</th>
+                  <th>Motivo</th>
+                </tr>
+              </thead>
+              <tbody id="cancellationRows"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </section>
 
     <section class="view" id="shift">
       <div class="workspace">
-        <div class="panel">
+        <form class="panel form-panel" id="openShiftForm">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Apertura</p>
+              <h3>Abrir turno</h3>
+            </div>
+          </div>
+          <div class="form-grid">
+            <label>Tipo de turno
+              <select name="shiftType" required>
+                <option value="MORNING">Matutino</option>
+                <option value="EVENING">Vespertino</option>
+              </select>
+            </label>
+            <label>Fondo inicial
+              <input name="openingCash" type="number" min="0" step="0.01" value="0" required>
+            </label>
+          </div>
+          <fieldset>
+            <legend>Barberos que trabajarán</legend>
+            <div class="barber-checklist" id="shiftBarberOptions"></div>
+          </fieldset>
+          <button class="submit-button" type="submit">
+            <span class="material-symbols-outlined">point_of_sale</span>
+            Abrir turno
+          </button>
+        </form>
+        <div class="panel shift-dashboard" id="shiftDashboard">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Caja</p>
               <h3>Corte de turno</h3>
+              <p id="currentShiftLabel">No hay un turno abierto</p>
             </div>
-            <button class="submit-button compact" id="printShift">
-              <span class="material-symbols-outlined">print</span>
-              Imprimir corte
-            </button>
+            <span class="shift-status" id="shiftStatus">Sin turno</span>
           </div>
-          <div class="summary-grid" id="shiftSummary"></div>
+
+          <div class="reconciliation-grid">
+            <section class="cut-card">
+              <p class="eyebrow">Según el sistema</p>
+              <div id="shiftSystemTotals"></div>
+            </section>
+            <form class="cut-card" id="closeShiftForm">
+              <p class="eyebrow">Conteo real</p>
+              <label>Efectivo contado
+                <input name="cashCounted" type="number" min="0" step="0.01" value="0" required>
+              </label>
+              <label>Corte de terminal
+                <input name="cardReported" type="number" min="0" step="0.01" value="0" required>
+              </label>
+              <label>Transferencias verificadas
+                <input name="transferReported" type="number" min="0" step="0.01" value="0" required>
+              </label>
+            </form>
+          </div>
+
+          <div class="reconciliation-grid">
+            <section class="cut-card">
+              <div class="panel-header">
+                <div><p class="eyebrow">Salidas de caja</p><h3>Gastos</h3></div>
+              </div>
+              <form class="expense-form" id="expenseForm">
+                <input name="concept" maxlength="200" placeholder="Concepto del gasto" required>
+                <input name="amount" type="number" min="0.01" step="0.01" placeholder="$0" required>
+                <button class="chip-button pay" type="submit">Agregar</button>
+              </form>
+              <div id="expenseList"></div>
+            </section>
+            <section class="cut-card">
+              <p class="eyebrow">Resultado</p>
+              <div class="reconciliation-result" id="reconciliationResult"></div>
+              <button class="submit-button" form="closeShiftForm" type="submit">
+                <span class="material-symbols-outlined">lock</span>
+                Cerrar e imprimir corte
+              </button>
+            </section>
+          </div>
+
+          <div class="reconciliation-grid">
+            <section class="cut-card">
+              <p class="eyebrow">Equipo</p>
+              <h3>Producción por barbero</h3>
+              <div id="barberProduction"></div>
+            </section>
+            <section class="cut-card">
+              <p class="eyebrow">Trabajo realizado</p>
+              <h3>Servicios</h3>
+              <div id="serviceProduction"></div>
+            </section>
+          </div>
+
+          <details class="movement-details">
+            <summary id="movementSummary">Ver movimientos del turno</summary>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Hora</th><th>Cliente</th><th>Servicios</th><th>Barbero</th><th>Pago</th><th>Total</th></tr></thead>
+                <tbody id="saleRows"></tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Historial</p>
+              <h3>Turnos anteriores</h3>
+            </div>
+          </div>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Hora</th>
-                  <th>Cliente</th>
-                  <th>Servicios</th>
-                  <th>Barbero</th>
-                  <th>Pago</th>
-                  <th>Total</th>
+                  <th>Fecha</th>
+                  <th>Turno</th>
+                  <th>Barberos</th>
+                  <th>Folios</th>
+                  <th>Venta</th>
+                  <th>Gastos</th>
+                  <th>Diferencia</th>
+                  <th></th>
                 </tr>
               </thead>
-              <tbody id="saleRows"></tbody>
+              <tbody id="shiftHistoryRows"></tbody>
             </table>
           </div>
         </div>
       </div>
     </section>
   </main>
+
+  <div class="modal-backdrop hidden" id="cancellationModal">
+    <form class="modal-card" id="cancellationForm">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Citas</p>
+          <h3>Cancelar cita</h3>
+        </div>
+        <button class="icon-button" id="closeCancellationModal" type="button" title="Cerrar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <p id="cancellationAppointmentLabel"></p>
+      <label>Motivo de la cancelación
+        <textarea name="reason" maxlength="500" rows="4"
+          placeholder="Ej. El cliente llamó para cancelar" required></textarea>
+      </label>
+      <div class="modal-actions">
+        <button class="secondary-button" id="cancelCancellationModal" type="button">Volver</button>
+        <button class="submit-button danger-button" type="submit">Confirmar cancelación</button>
+      </div>
+    </form>
+  </div>
 
   <div class="toast" id="toast"></div>
   <datalist id="customerPhoneOptions"></datalist>

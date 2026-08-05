@@ -2,7 +2,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AppointmentStatus(str, Enum):
@@ -20,8 +20,15 @@ class AppointmentCreate(BaseModel):
     appointment_time: time
 
 
+class AppointmentUpdate(BaseModel):
+    service_id: int
+    appointment_date: date
+    appointment_time: time
+
+
 class AppointmentStatusUpdate(BaseModel):
     status: AppointmentStatus
+    cancellation_note: str | None = Field(default=None, max_length=500)
 
 
 class AppointmentRead(BaseModel):
@@ -40,5 +47,7 @@ class AppointmentRead(BaseModel):
     appointment_time: time
     price: Decimal
     status: AppointmentStatus
+    cancellation_note: str | None
+    cancelled_at: datetime | None
     created_at: datetime
     updated_at: datetime

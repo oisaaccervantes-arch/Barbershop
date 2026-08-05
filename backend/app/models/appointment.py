@@ -42,6 +42,8 @@ class Appointment(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="PENDING", server_default="PENDING"
     )
+    cancellation_note: Mapped[str | None] = mapped_column(String(500))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -55,4 +57,3 @@ class Appointment(Base):
     customer = relationship("Customer")
     barber = relationship("Barber")
     service = relationship("Service")
-

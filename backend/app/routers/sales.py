@@ -12,6 +12,7 @@ from app.database import get_db
 from app.models.appointment import Appointment
 from app.models.barber import Barber
 from app.models.customer import Customer
+from app.models.cash_shift import CashShift, ShiftBarber
 from app.models.sale import Payment, Sale, SaleItem
 from app.models.service import Service
 from app.schemas.sale import PaymentMethod, SaleCreate, SaleRead
@@ -31,6 +32,8 @@ def serialize_sale(sale: Sale) -> dict:
         "barber_id": sale.barber_id,
         "barber_name": sale.barber.name,
         "appointment_id": sale.appointment_id,
+        "shift_id": sale.shift_id,
+        "receipt_number": sale.receipt_number,
         "subtotal": sale.subtotal,
         "discount": sale.discount,
         "discount_reason": sale.discount_reason,
@@ -86,6 +89,25 @@ def create_sale(payload: SaleCreate, db: DatabaseSession):
         if payload.appointment_id
         else None
     )
+    shift = db.get(CashShift, payload.shift_id)
+    if shift is None or shift.status != "OPEN":
+        raise HTTPException(status_code=400, detail="El turno no está abierto")
+    barber_in_shift = db.scalar(
+        select(ShiftBarber.id).where(
+            ShiftBarber.shift_id == shift.id,
+            ShiftBarber.barber_id == payload.barber_id,
+        )
+    )
+    if barber_in_shift is None:
+        raise HTTPException(status_code=400, detail="El barbero no está registrado en el turno")
+    duplicate_receipt = db.scalar(
+        select(Sale.id).where(
+            Sale.shift_id == shift.id,
+            Sale.receipt_number == payload.receipt_number,
+        )
+    )
+    if duplicate_receipt:
+        raise HTTPException(status_code=409, detail="Ese folio ya fue utilizado en el turno")
     if payload.customer_id and (customer is None or not customer.active):
         raise HTTPException(status_code=400, detail="El cliente no está activo")
     if barber is None or not barber.active:
@@ -190,6 +212,8 @@ def create_sale(payload: SaleCreate, db: DatabaseSession):
         customer_id=payload.customer_id,
         barber_id=payload.barber_id,
         appointment_id=payload.appointment_id,
+        shift_id=shift.id,
+        receipt_number=payload.receipt_number,
         subtotal=subtotal,
         discount=discount,
         discount_reason=discount_reason,

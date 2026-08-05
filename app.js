@@ -46,6 +46,9 @@ let catalogCustomers = [];
 let pendingAppointmentId = null;
 let appointmentView = "active";
 let birthdayDiscountServiceId = null;
+let currentShift = null;
+let shiftHistory = [];
+let pendingCancellationAppointmentId = null;
 
 const appointmentStatusFromApi = {
   PENDING: "pendiente",
@@ -192,7 +195,9 @@ async function loadAppointmentsFromApi() {
     serviceId: String(appointment.service_id),
     serviceName: appointment.service_name,
     price: Number(appointment.price),
-    status: appointmentStatusFromApi[appointment.status]
+    status: appointmentStatusFromApi[appointment.status],
+    cancellationNote: appointment.cancellation_note || "",
+    cancelledAt: appointment.cancelled_at || null
   }));
   saveState();
 }
@@ -213,6 +218,8 @@ function mapSaleFromApi(sale) {
     barberId: String(sale.barber_id),
     barber: sale.barber_name,
     appointmentId: sale.appointment_id ? String(sale.appointment_id) : null,
+    shiftId: sale.shift_id ? String(sale.shift_id) : null,
+    receiptNumber: sale.receipt_number,
     discount: Number(sale.discount || 0),
     discountReason: sale.discount_reason || null,
     payment: sale.payments.length > 1
@@ -245,13 +252,28 @@ async function loadSalesFromApi() {
   saveState();
 }
 
-async function updateAppointmentStatus(appointmentId, status) {
+async function loadCurrentShiftFromApi() {
+  const response = await fetch(`${API_BASE_URL}/shifts/current`);
+  if (!response.ok) throw new Error("No fue posible consultar el turno");
+  currentShift = await response.json();
+}
+
+async function loadShiftHistoryFromApi() {
+  const response = await fetch(`${API_BASE_URL}/shifts`);
+  if (!response.ok) throw new Error("No fue posible consultar el historial de turnos");
+  shiftHistory = await response.json();
+}
+
+async function updateAppointmentStatus(appointmentId, status, cancellationNote = null) {
   const response = await fetch(
     `${API_BASE_URL}/appointments/${appointmentId}/status`,
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status })
+      body: JSON.stringify({
+        status,
+        cancellation_note: cancellationNote
+      })
     }
   );
   if (!response.ok) throw new Error("No fue posible actualizar la cita");
@@ -339,6 +361,43 @@ function resetServiceForm() {
   $("#cancelServiceEdit").classList.add("hidden");
 }
 
+function resetAppointmentForm() {
+  const form = $("#appointmentForm");
+  form.reset();
+  form.appointmentId.value = "";
+  form.phone.disabled = false;
+  form.customer.readOnly = false;
+  form.birthDate.disabled = false;
+  form.barber.disabled = false;
+  delete form.customer.dataset.customerId;
+  form.date.value = todayISO();
+  form.time.value = nowTime();
+  updateAppointmentBarberOptions();
+  $("#appointmentFormTitle").textContent = "Nueva cita";
+  $("#appointmentSubmitLabel").textContent = "Guardar cita";
+  $("#cancelAppointmentEdit").classList.add("hidden");
+}
+
+function timeToMinutes(value) {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function appointmentConflicts(form, excludeId = null) {
+  const requestedStart = timeToMinutes(form.time.value);
+  const requestedEnd = requestedStart + 15;
+  return state.appointments.find(appointment => {
+    const existingStart = timeToMinutes(appointment.time);
+    const existingEnd = existingStart + 15;
+    return appointment.id !== excludeId
+      && appointment.barberId === form.barber.value
+      && appointment.date === form.date.value
+      && ["pendiente", "confirmada"].includes(appointment.status)
+      && requestedStart < existingEnd
+      && requestedEnd > existingStart;
+  });
+}
+
 function resetBarberForm() {
   const form = $("#barberForm");
   form.reset();
@@ -386,6 +445,20 @@ function autofillCustomerByPhone(form) {
 function isBirthdayOn(birthDate, targetDate = todayISO()) {
   if (!birthDate || !targetDate) return false;
   return birthDate.slice(5) === targetDate.slice(5);
+}
+
+function formatAppointmentDate(isoDate) {
+  const target = new Date(`${isoDate}T12:00:00`);
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowISO = dateToLocalISO(tomorrow);
+  if (isoDate === todayISO()) return "Hoy";
+  if (isoDate === tomorrowISO) return "Mañana";
+  const options = { weekday: "short", day: "numeric", month: "short" };
+  if (target.getFullYear() !== new Date().getFullYear()) options.year = "numeric";
+  return new Intl.DateTimeFormat("es-MX", options)
+    .format(target)
+    .replace(",", "");
 }
 
 function currentSaleCustomer() {
@@ -482,6 +555,14 @@ function renderSelects() {
       .join("");
   });
 
+  const saleBarberSelect = $("#saleForm select[name='barber']");
+  if (currentShift && saleBarberSelect) {
+    saleBarberSelect.innerHTML = currentShift.barbers
+      .map(barber => `<option value="${barber.id}">${escapeHtml(barber.name)}</option>`)
+      .join("");
+  }
+  updateAppointmentBarberOptions();
+
   const serviceOptions = state.services
     .map(service => `<option value="${service.id}">${service.name} - ${money(service.price)}</option>`)
     .join("");
@@ -503,6 +584,23 @@ function renderSelects() {
   `;
   if ([...barberFilter.options].some(option => option.value === selectedBarber)) {
     barberFilter.value = selectedBarber;
+  }
+}
+
+function updateAppointmentBarberOptions() {
+  const form = $("#appointmentForm");
+  const select = form.barber;
+  const selectedBarber = select.value;
+  const usesCurrentShift = currentShift
+    && form.date.value === currentShift.business_date;
+  const barbers = usesCurrentShift
+    ? currentShift.barbers
+    : catalogBarbers.filter(barber => barber.active);
+  select.innerHTML = barbers
+    .map(barber => `<option value="${barber.id}">${escapeHtml(barber.name)}</option>`)
+    .join("");
+  if ([...select.options].some(option => option.value === selectedBarber)) {
+    select.value = selectedBarber;
   }
 }
 
@@ -530,20 +628,29 @@ function renderAppointments() {
       : !activeStatuses.includes(item.status)
     )
     .filter(item => `${item.customer} ${item.serviceName} ${item.barber}`.toLowerCase().includes(query))
-    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
+    .sort((a, b) => appointmentView === "active"
+      ? `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`)
+      : `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)
+    )
     .map(item => `
       <tr>
         <td><strong>${item.customer}</strong>${isBirthdayOn(item.birthDate, item.date) ? ` <span title="Cumpleaños">🎂</span>` : ""}<small>${item.phone || "Sin telefono"}</small></td>
         <td>${item.serviceName}<br><small>${money(item.price)}</small></td>
         <td>${item.barber}</td>
-        <td>${item.date}<br><small>${item.time}</small></td>
-        <td><span class="status ${item.status}">${item.status}</span></td>
+        <td class="appointment-date"><strong>${formatAppointmentDate(item.date)}</strong><small>${item.time}</small></td>
+        <td>
+          <span class="status ${item.status}">${item.status}</span>
+          ${item.status === "cancelada" && item.cancellationNote
+            ? `<small class="cancellation-note">Motivo: ${escapeHtml(item.cancellationNote)}</small>`
+            : ""}
+        </td>
         <td>
           ${["atendida", "cancelada"].includes(item.status) ? "" : `
             <div class="row-actions">
               ${item.status === "pendiente"
                 ? `<button class="chip-button" data-action="confirm" data-id="${item.id}">Confirmar</button>`
                 : ""}
+              <button class="chip-button" data-action="edit" data-id="${item.id}">Editar</button>
               <button class="chip-button pay" data-action="charge" data-id="${item.id}">Cobrar</button>
               <button class="chip-button danger" data-action="cancel" data-id="${item.id}">Cancelar</button>
             </div>
@@ -673,36 +780,105 @@ function renderCart() {
 }
 
 function renderShift() {
-  const salesToday = state.sales
-    .filter(sale => sale.date === todayISO())
+  const shiftSales = state.sales
+    .filter(sale => currentShift && sale.shiftId === String(currentShift.id))
     .sort((a, b) =>
       `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)
   );
-  const total = salesToday.reduce((sum, sale) => sum + sale.total, 0);
-  const byMethod = method => salesToday.reduce(
+  const total = roundMoney(shiftSales.reduce((sum, sale) => sum + sale.total, 0));
+  const byMethod = method => roundMoney(shiftSales.reduce(
     (sum, sale) => sum + (sale.payments || [])
       .filter(payment => payment.method === method)
       .reduce((paymentSum, payment) => paymentSum + payment.amount, 0),
     0
-  );
+  ));
 
-  $("#shiftSummary").innerHTML = [
-    ["Total", money(total)],
-    ["Efectivo", money(byMethod("CASH"))],
-    ["Tarjeta", money(byMethod("CARD"))],
-    ["Transferencia", money(byMethod("TRANSFER"))],
-    ["Servicios", salesToday.reduce(
-      (sum, sale) => sum + sale.items.reduce(
-        (itemSum, item) => itemSum + (item.quantity || 1),
-        0
-      ),
-      0
-    )]
-  ].map(([label, value]) => `<div class="summary-card"><span>${label}</span><strong>${value}</strong></div>`).join("");
+  $("#openShiftForm").classList.toggle("hidden", Boolean(currentShift));
+  $("#shiftDashboard").classList.toggle("hidden", !currentShift);
+  $("#currentShiftLabel").textContent = currentShift
+    ? `${currentShift.shift_type === "MORNING" ? "Matutino" : "Vespertino"} · ${currentShift.business_date} · Folio siguiente: ${currentShift.next_receipt_number}`
+    : "No hay un turno abierto";
+  $("#shiftStatus").textContent = currentShift ? "Abierto" : "Sin turno";
+  $("#shiftBarberOptions").innerHTML = catalogBarbers
+    .filter(barber => barber.active)
+    .map(barber => `<label><input type="checkbox" name="barberIds" value="${barber.id}"> ${escapeHtml(barber.name)}</label>`)
+    .join("");
+  $("#saleForm").receiptNumber.disabled = !currentShift;
+  if (currentShift && !$("#saleForm").receiptNumber.value) {
+    $("#saleForm").receiptNumber.value = currentShift.next_receipt_number;
+  }
+  if (!currentShift) return;
 
-  $("#saleRows").innerHTML = salesToday.map(sale => `
+  const cashSales = byMethod("CASH");
+  const cardSales = byMethod("CARD");
+  const transferSales = byMethod("TRANSFER");
+  const expenses = currentShift.expenses || [];
+  const expenseTotal = roundMoney(expenses.reduce((sum, expense) => sum + Number(expense.amount), 0));
+  const expectedCash = roundMoney(Number(currentShift.opening_cash) + cashSales - expenseTotal);
+
+  $("#shiftSystemTotals").innerHTML = `
+    <div class="cut-line"><span>Fondo inicial</span><strong>${money(currentShift.opening_cash)}</strong></div>
+    <div class="cut-line"><span>Ventas en efectivo</span><strong>${money(cashSales)}</strong></div>
+    <div class="cut-line"><span>Gastos</span><strong>-${money(expenseTotal)}</strong></div>
+    <div class="cut-line"><span>Tarjeta</span><strong>${money(cardSales)}</strong></div>
+    <div class="cut-line"><span>Transferencias</span><strong>${money(transferSales)}</strong></div>
+    <div class="cut-line total"><span>Efectivo esperado</span><strong>${money(expectedCash)}</strong></div>
+    <div class="cut-line total"><span>Venta total</span><strong>${money(total)}</strong></div>
+  `;
+
+  $("#expenseList").innerHTML = expenses.length
+    ? expenses.map(expense => `<div class="expense-line"><span>${escapeHtml(expense.concept)}</span><strong>-${money(expense.amount)}</strong></div>`).join("")
+    : `<p class="muted">Sin gastos registrados.</p>`;
+
+  const byBarber = new Map();
+  shiftSales.forEach(sale => {
+    const row = byBarber.get(sale.barberId) || {
+      name: sale.barber,
+      sales: 0,
+      services: 0,
+      serviceCounts: new Map()
+    };
+    row.sales += sale.total;
+    sale.items.forEach(item => {
+      const quantity = item.quantity || 1;
+      row.services += quantity;
+      row.serviceCounts.set(
+        item.name,
+        (row.serviceCounts.get(item.name) || 0) + quantity
+      );
+    });
+    byBarber.set(sale.barberId, row);
+  });
+  $("#barberProduction").innerHTML = [...byBarber.values()]
+    .map(row => `
+      <div class="production-line barber-production-line">
+        <span>
+          <strong>${escapeHtml(row.name)}</strong>
+          <small>${[...row.serviceCounts]
+            .map(([serviceName, quantity]) => `${escapeHtml(serviceName)} × ${quantity}`)
+            .join(" · ")}</small>
+        </span>
+        <strong>${money(row.sales)}</strong>
+      </div>
+    `)
+    .join("") || `<p class="muted">Todavía no hay producción.</p>`;
+
+  const byService = new Map();
+  shiftSales.flatMap(sale => sale.items).forEach(item => {
+    const row = byService.get(item.id) || { name: item.name, quantity: 0, total: 0 };
+    row.quantity += item.quantity || 1;
+    row.total += item.price * (item.quantity || 1);
+    byService.set(item.id, row);
+  });
+  $("#serviceProduction").innerHTML = [...byService.values()]
+    .map(row => `<div class="production-line"><span>${escapeHtml(row.name)} × ${row.quantity}</span><strong>${money(row.total)}</strong></div>`)
+    .join("") || `<p class="muted">Todavía no hay servicios.</p>`;
+
+  $("#movementSummary").textContent = `Ver ${shiftSales.length} movimientos del turno`;
+
+  $("#saleRows").innerHTML = shiftSales.map(sale => `
     <tr>
-      <td>${sale.time}</td>
+      <td>${sale.time}<br><small>Folio ${sale.receiptNumber ?? "—"}</small></td>
       <td>${sale.customer || "Publico general"}</td>
       <td>${sale.items.map(item => item.name).join(", ")}</td>
       <td>${sale.barber}</td>
@@ -710,6 +886,151 @@ function renderShift() {
       <td><strong>${money(sale.total)}</strong></td>
     </tr>
   `).join("") || `<tr><td colspan="6">Todavia no hay ventas en este turno.</td></tr>`;
+
+  updateReconciliation(expectedCash, cardSales, transferSales);
+}
+
+function shiftFinancialSummary(shift) {
+  const sales = state.sales
+    .filter(sale => sale.shiftId === String(shift.id))
+    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+  const byMethod = method => roundMoney(sales.reduce(
+    (sum, sale) => sum + sale.payments
+      .filter(payment => payment.method === method)
+      .reduce((paymentSum, payment) => paymentSum + payment.amount, 0), 0
+  ));
+  const expenses = roundMoney((shift.expenses || []).reduce(
+    (sum, expense) => sum + Number(expense.amount), 0
+  ));
+  const expectedCash = roundMoney(Number(shift.opening_cash) + byMethod("CASH") - expenses);
+  const difference = shift.status === "CLOSED" ? roundMoney(
+    Number(shift.cash_counted || 0) - expectedCash
+    + Number(shift.card_reported || 0) - byMethod("CARD")
+    + Number(shift.transfer_reported || 0) - byMethod("TRANSFER")
+  ) : null;
+  return {
+    sales,
+    total: roundMoney(sales.reduce((sum, sale) => sum + sale.total, 0)),
+    cash: byMethod("CASH"),
+    card: byMethod("CARD"),
+    transfer: byMethod("TRANSFER"),
+    expectedCash,
+    expenses,
+    difference,
+    firstFolio: sales[0]?.receiptNumber,
+    lastFolio: sales[sales.length - 1]?.receiptNumber
+  };
+}
+
+function historicalShiftDetail(shift, summary) {
+  const barberTotals = new Map();
+  const serviceTotals = new Map();
+  summary.sales.forEach(sale => {
+    const barber = barberTotals.get(sale.barberId) || {
+      name: sale.barber, total: 0, services: new Map()
+    };
+    barber.total += sale.total;
+    sale.items.forEach(item => {
+      const quantity = item.quantity || 1;
+      barber.services.set(item.name, (barber.services.get(item.name) || 0) + quantity);
+      const service = serviceTotals.get(item.id) || { name: item.name, quantity: 0, total: 0 };
+      service.quantity += quantity;
+      service.total += item.price * quantity;
+      serviceTotals.set(item.id, service);
+    });
+    barberTotals.set(sale.barberId, barber);
+  });
+  const cashDifference = roundMoney(Number(shift.cash_counted || 0) - summary.expectedCash);
+  const cardDifference = roundMoney(Number(shift.card_reported || 0) - summary.card);
+  const transferDifference = roundMoney(Number(shift.transfer_reported || 0) - summary.transfer);
+  const differenceLine = value => `<strong class="${value === 0 ? "balanced-text" : value < 0 ? "short-text" : "over-text"}">${money(value)}</strong>`;
+  return `
+    <div class="history-detail-grid">
+      <section class="history-detail-card">
+        <h4>Conciliación</h4>
+        <div class="cut-line"><span>Fondo inicial</span><strong>${money(shift.opening_cash)}</strong></div>
+        <div class="cut-line"><span>Efectivo esperado</span><strong>${money(summary.expectedCash)}</strong></div>
+        <div class="cut-line"><span>Efectivo contado</span><strong>${money(shift.cash_counted)}</strong></div>
+        <div class="cut-line"><span>Diferencia efectivo</span>${differenceLine(cashDifference)}</div>
+        <div class="cut-line"><span>Tarjeta sistema / terminal</span><strong>${money(summary.card)} / ${money(shift.card_reported)}</strong></div>
+        <div class="cut-line"><span>Diferencia tarjeta</span>${differenceLine(cardDifference)}</div>
+        <div class="cut-line"><span>Transferencias sistema / verificadas</span><strong>${money(summary.transfer)} / ${money(shift.transfer_reported)}</strong></div>
+        <div class="cut-line"><span>Diferencia transferencias</span>${differenceLine(transferDifference)}</div>
+      </section>
+      <section class="history-detail-card">
+        <h4>Gastos</h4>
+        ${(shift.expenses || []).map(expense => `
+          <div class="expense-line"><span>${escapeHtml(expense.concept)}</span><strong>-${money(expense.amount)}</strong></div>
+        `).join("") || `<p class="muted">Sin gastos registrados.</p>`}
+        <div class="cut-line total"><span>Total de gastos</span><strong>${money(summary.expenses)}</strong></div>
+      </section>
+      <section class="history-detail-card">
+        <h4>Producción por barbero</h4>
+        ${[...barberTotals.values()].map(barber => `
+          <div class="production-line barber-production-line">
+            <span><strong>${escapeHtml(barber.name)}</strong><small>${[...barber.services].map(([name, quantity]) => `${escapeHtml(name)} × ${quantity}`).join(" · ")}</small></span>
+            <strong>${money(barber.total)}</strong>
+          </div>
+        `).join("") || `<p class="muted">Sin producción.</p>`}
+      </section>
+      <section class="history-detail-card">
+        <h4>Servicios realizados</h4>
+        ${[...serviceTotals.values()].map(service => `
+          <div class="production-line"><span>${escapeHtml(service.name)} × ${service.quantity}</span><strong>${money(service.total)}</strong></div>
+        `).join("") || `<p class="muted">Sin servicios.</p>`}
+        <div class="cut-line"><span>Descuentos aplicados</span><strong>-${money(summary.sales.reduce((sum, sale) => sum + (sale.discount || 0), 0))}</strong></div>
+        <div class="cut-line total"><span>Venta neta</span><strong>${money(summary.total)}</strong></div>
+      </section>
+    </div>
+    <div class="table-wrap history-movements">
+      <table>
+        <thead><tr><th>Folio</th><th>Hora</th><th>Cliente</th><th>Servicios</th><th>Barbero</th><th>Pago</th><th>Total</th></tr></thead>
+        <tbody>${summary.sales.map(sale => `
+          <tr><td>${sale.receiptNumber ?? "—"}</td><td>${sale.time}</td><td>${escapeHtml(sale.customer || "Público general")}</td><td>${sale.items.map(item => escapeHtml(item.name)).join(", ")}${sale.discount ? `<small>Descuento: -${money(sale.discount)}</small>` : ""}</td><td>${escapeHtml(sale.barber)}</td><td>${sale.payment}</td><td><strong>${money(sale.total)}</strong></td></tr>
+        `).join("") || `<tr><td colspan="7">Sin movimientos.</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderShiftHistory() {
+  const closedShifts = shiftHistory.filter(shift => shift.status === "CLOSED");
+  $("#shiftHistoryRows").innerHTML = closedShifts.map(shift => {
+    const summary = shiftFinancialSummary(shift);
+    const differenceClass = summary.difference === 0 ? "balanced-text" : summary.difference < 0 ? "short-text" : "over-text";
+    const folios = summary.firstFolio === undefined
+      ? "Sin ventas"
+      : `${summary.firstFolio} → ${summary.lastFolio}`;
+    return `
+      <tr>
+        <td><strong>${formatAppointmentDate(shift.business_date)}</strong><small>${new Date(shift.opened_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}</small></td>
+        <td>${shift.shift_type === "MORNING" ? "Matutino" : "Vespertino"}</td>
+        <td>${shift.barbers.map(barber => escapeHtml(barber.name)).join(", ")}</td>
+        <td>${folios}</td>
+        <td><strong>${money(summary.total)}</strong><small>${summary.sales.length} ventas</small></td>
+        <td>${money(summary.expenses)}</td>
+        <td class="${differenceClass}"><strong>${money(summary.difference)}</strong></td>
+        <td><div class="row-actions"><button class="chip-button" type="button" data-toggle-shift="${shift.id}">Ver desglose</button><button class="chip-button" type="button" data-print-shift="${shift.id}">Reimprimir</button></div></td>
+      </tr>
+      <tr class="shift-history-detail hidden" id="shift-history-${shift.id}"><td colspan="8">${historicalShiftDetail(shift, summary)}</td></tr>
+    `;
+  }).join("") || `<tr><td colspan="8">Todavía no hay turnos cerrados.</td></tr>`;
+}
+
+function updateReconciliation(expectedCash, expectedCard, expectedTransfer) {
+  if (!currentShift) return;
+  const form = $("#closeShiftForm");
+  const cashDifference = roundMoney(Number(form.cashCounted.value || 0) - expectedCash);
+  const cardDifference = roundMoney(Number(form.cardReported.value || 0) - expectedCard);
+  const transferDifference = roundMoney(Number(form.transferReported.value || 0) - expectedTransfer);
+  const difference = roundMoney(cashDifference + cardDifference + transferDifference);
+  const result = $("#reconciliationResult");
+  result.className = `reconciliation-result ${difference === 0 ? "balanced" : difference < 0 ? "short" : "over"}`;
+  result.innerHTML = difference === 0
+    ? `<span>Todo coincide</span><strong>Caja cuadrada</strong>`
+    : difference < 0
+      ? `<span>Diferencia total</span><strong>Faltan ${money(Math.abs(difference))}</strong>`
+      : `<span>Diferencia total</span><strong>Sobran ${money(difference)}</strong>`;
 }
 
 function renderSalesReport() {
@@ -724,6 +1045,7 @@ function renderSalesReport() {
     .filter(sale => {
       const searchableText = [
         sale.folio,
+        sale.receiptNumber,
         sale.customer || "Público general",
         sale.barber,
         sale.payment,
@@ -756,7 +1078,7 @@ function renderSalesReport() {
   $("#salesReportRows").innerHTML = sales.map(sale => `
     <tr>
       <td>${sale.date}<br><small>${sale.time}</small></td>
-      <td><strong>${escapeHtml((sale.folio || sale.id).slice(0, 8).toUpperCase())}</strong></td>
+      <td><strong>${sale.receiptNumber ?? escapeHtml((sale.folio || sale.id).slice(0, 8).toUpperCase())}</strong></td>
       <td>${escapeHtml(sale.customer || "Público general")}</td>
       <td>${sale.items.map(item =>
         `${item.quantity > 1 ? `${item.quantity} × ` : ""}${escapeHtml(item.name)}`
@@ -773,6 +1095,46 @@ function renderSalesReport() {
   `).join("") || `<tr><td colspan="8">No hay ventas en el periodo seleccionado.</td></tr>`;
 }
 
+function renderCancellations() {
+  const query = ($("#cancellationSearch")?.value || "").trim().toLowerCase();
+  const cancellations = state.appointments
+    .filter(appointment => appointment.status === "cancelada")
+    .filter(appointment => [
+      appointment.customer,
+      appointment.phone,
+      appointment.serviceName,
+      appointment.barber,
+      appointment.cancellationNote
+    ].join(" ").toLowerCase().includes(query))
+    .sort((a, b) => {
+      const aKey = a.cancelledAt || `${a.date}T${a.time}`;
+      const bKey = b.cancelledAt || `${b.date}T${b.time}`;
+      return bKey.localeCompare(aKey);
+    });
+  const allCancellations = state.appointments.filter(item => item.status === "cancelada");
+  const withReason = allCancellations.filter(item => item.cancellationNote).length;
+  $("#cancellationSummary").textContent =
+    `${allCancellations.length} cancelaciones · ${withReason} con motivo registrado`;
+  $("#cancellationRows").innerHTML = cancellations.map(appointment => {
+    const cancelledDate = appointment.cancelledAt
+      ? new Date(appointment.cancelledAt).toLocaleString("es-MX", {
+          day: "numeric", month: "short", year: "numeric",
+          hour: "2-digit", minute: "2-digit"
+        })
+      : "Cancelación anterior";
+    return `
+      <tr>
+        <td>${cancelledDate}</td>
+        <td><strong>${formatAppointmentDate(appointment.date)}</strong><small>${appointment.time}</small></td>
+        <td><strong>${escapeHtml(appointment.customer)}</strong><small>${escapeHtml(appointment.phone || "Sin teléfono")}</small></td>
+        <td>${escapeHtml(appointment.serviceName)}<small>${money(appointment.price)}</small></td>
+        <td>${escapeHtml(appointment.barber)}</td>
+        <td class="cancellation-reason">${escapeHtml(appointment.cancellationNote || "Sin motivo registrado")}</td>
+      </tr>
+    `;
+  }).join("") || `<tr><td colspan="6">No hay cancelaciones que coincidan con la búsqueda.</td></tr>`;
+}
+
 function renderAll() {
   renderSelects();
   renderShell();
@@ -782,7 +1144,9 @@ function renderAll() {
   renderCustomers();
   renderCart();
   renderShift();
+  renderShiftHistory();
   renderSalesReport();
+  renderCancellations();
 }
 
 function switchView(view) {
@@ -814,7 +1178,7 @@ function saleTicket(sale) {
     <h2 style="text-align:center;margin:0">BIZANTINO</h2>
     <p style="text-align:center;margin:0 0 10px">Barberia</p>
     <hr>
-    <p>Folio: ${(sale.folio || sale.id).slice(0, 8).toUpperCase()}<br>Fecha: ${sale.date} ${sale.time}<br>Barbero: ${sale.barber}</p>
+    <p>Folio: ${sale.receiptNumber ?? (sale.folio || sale.id).slice(0, 8).toUpperCase()}<br>Fecha: ${sale.date} ${sale.time}<br>Barbero: ${sale.barber}</p>
     <p>Cliente: ${sale.customer || "Publico general"}</p>
     ${sale.discount ? `<p>Descuento de cumpleaños: <strong>-${money(sale.discount)}</strong></p>` : ""}
     <hr>
@@ -838,19 +1202,40 @@ function saleTicket(sale) {
 
 function shiftTicket() {
   const salesToday = state.sales
-    .filter(sale => sale.date === todayISO())
+    .filter(sale => currentShift && sale.shiftId === String(currentShift.id))
     .sort((a, b) =>
       `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)
     );
   const total = salesToday.reduce((sum, sale) => sum + sale.total, 0);
+  const paymentTotal = method => salesToday.reduce(
+    (sum, sale) => sum + sale.payments
+      .filter(payment => payment.method === method)
+      .reduce((paymentSum, payment) => paymentSum + payment.amount, 0),
+    0
+  );
+  const expenseTotal = (currentShift?.expenses || []).reduce(
+    (sum, expense) => sum + Number(expense.amount), 0
+  );
+  const expectedCash = Number(currentShift?.opening_cash || 0) + paymentTotal("CASH") - expenseTotal;
+  const difference = roundMoney(
+    Number(currentShift?.cash_counted || 0) - expectedCash
+    + Number(currentShift?.card_reported || 0) - paymentTotal("CARD")
+    + Number(currentShift?.transfer_reported || 0) - paymentTotal("TRANSFER")
+  );
   return `
     <h2 style="text-align:center;margin:0">BIZANTINO</h2>
     <p style="text-align:center;margin:0 0 10px">Corte de turno</p>
     <hr>
-    <p>Fecha: ${todayISO()}<br>Ventas: ${salesToday.length}</p>
-    ${salesToday.map(sale => `<p>${sale.time} ${sale.payment}<br>${sale.items.map(item => item.name).join(", ")}<br><strong>${money(sale.total)}</strong></p>`).join("")}
+    <p>Fecha: ${currentShift?.business_date || todayISO()}<br>Turno: ${currentShift?.shift_type === "MORNING" ? "Matutino" : "Vespertino"}<br>Ventas: ${salesToday.length}</p>
+    <p>Efectivo esperado: <strong>${money(expectedCash)}</strong><br>Efectivo contado: <strong>${money(currentShift?.cash_counted || 0)}</strong></p>
+    <p>Tarjeta sistema/terminal: ${money(paymentTotal("CARD"))} / ${money(currentShift?.card_reported || 0)}<br>Transferencias sistema/verificadas: ${money(paymentTotal("TRANSFER"))} / ${money(currentShift?.transfer_reported || 0)}</p>
+    <p>Gastos: <strong>${money(expenseTotal)}</strong></p>
+    ${(currentShift?.expenses || []).map(expense => `<p>${escapeHtml(expense.concept)}: -${money(expense.amount)}</p>`).join("")}
     <hr>
     <h3>Total: ${money(total)}</h3>
+    <h3>Diferencia: ${money(difference)}</h3>
+    <hr>
+    ${salesToday.map(sale => `<p>Folio ${sale.receiptNumber ?? "—"} · ${sale.time} · ${sale.payment}<br>${sale.items.map(item => item.name).join(", ")}<br><strong>${money(sale.total)}</strong></p>`).join("")}
   `;
 }
 
@@ -871,6 +1256,25 @@ document.addEventListener("click", async event => {
   if (reprintSale) {
     const sale = state.sales.find(item => item.id === reprintSale.dataset.reprintSale);
     if (sale) printBlock(saleTicket(sale));
+  }
+
+  const reprintShift = event.target.closest("[data-print-shift]");
+  if (reprintShift) {
+    const shift = shiftHistory.find(item => String(item.id) === reprintShift.dataset.printShift);
+    if (shift) {
+      const activeShift = currentShift;
+      currentShift = shift;
+      printBlock(shiftTicket());
+      currentShift = activeShift;
+    }
+  }
+
+  const toggleShift = event.target.closest("[data-toggle-shift]");
+  if (toggleShift) {
+    const detail = $(`#shift-history-${toggleShift.dataset.toggleShift}`);
+    const willOpen = detail.classList.contains("hidden");
+    detail.classList.toggle("hidden", !willOpen);
+    toggleShift.textContent = willOpen ? "Ocultar desglose" : "Ver desglose";
   }
 
   const serviceButton = event.target.closest("[data-service]");
@@ -1012,6 +1416,26 @@ document.addEventListener("click", async event => {
   if (action) {
     const appointment = state.appointments.find(item => item.id === action.dataset.id);
     try {
+      if (action.dataset.action === "edit") {
+        const form = $("#appointmentForm");
+        form.appointmentId.value = appointment.id;
+        form.phone.value = appointment.phone || "";
+        form.customer.value = appointment.customer;
+        form.birthDate.value = formatBirthDate(appointment.birthDate);
+        form.date.value = appointment.date;
+        form.time.value = appointment.time;
+        updateAppointmentBarberOptions();
+        form.barber.value = appointment.barberId;
+        form.serviceId.value = appointment.serviceId;
+        form.phone.disabled = true;
+        form.customer.readOnly = true;
+        form.birthDate.disabled = true;
+        form.barber.disabled = true;
+        $("#appointmentFormTitle").textContent = "Editar cita";
+        $("#appointmentSubmitLabel").textContent = "Guardar cambios";
+        $("#cancelAppointmentEdit").classList.remove("hidden");
+        form.time.focus();
+      }
       if (action.dataset.action === "confirm") {
         await updateAppointmentStatus(appointment.id, "CONFIRMED");
         await loadAppointmentsFromApi();
@@ -1019,10 +1443,13 @@ document.addEventListener("click", async event => {
         showToast("Cita confirmada");
       }
       if (action.dataset.action === "cancel") {
-        await updateAppointmentStatus(appointment.id, "CANCELLED");
-        await loadAppointmentsFromApi();
-        renderAll();
-        showToast("Cita cancelada");
+        pendingCancellationAppointmentId = appointment.id;
+        $("#cancellationAppointmentLabel").textContent =
+          `${appointment.customer} · ${appointment.serviceName} · ${formatAppointmentDate(appointment.date)} ${appointment.time}`;
+        $("#cancellationForm").reset();
+        $("#cancellationModal").classList.remove("hidden");
+        $("#cancellationForm").reason.focus();
+        return;
       }
       if (action.dataset.action === "charge") {
         cart = [{ id: appointment.serviceId, name: appointment.serviceName, price: appointment.price }];
@@ -1049,7 +1476,6 @@ $("#clearCart").addEventListener("click", () => {
   birthdayDiscountServiceId = null;
   renderCart();
 });
-$("#printShift").addEventListener("click", () => printBlock(shiftTicket()));
 $("#paymentMethod").addEventListener("change", updatePaymentFields);
 [
   "cashReceived",
@@ -1061,16 +1487,53 @@ $("#paymentMethod").addEventListener("change", updatePaymentFields);
   $("#saleForm")[fieldName].addEventListener("input", updatePaymentFields);
 });
 $("#cancelServiceEdit").addEventListener("click", resetServiceForm);
+$("#cancelAppointmentEdit").addEventListener("click", resetAppointmentForm);
 $("#cancelBarberEdit").addEventListener("click", resetBarberForm);
 $("#cancelCustomerEdit").addEventListener("click", resetCustomerForm);
+function closeCancellationModal() {
+  pendingCancellationAppointmentId = null;
+  $("#cancellationForm").reset();
+  $("#cancellationModal").classList.add("hidden");
+}
+$("#closeCancellationModal").addEventListener("click", closeCancellationModal);
+$("#cancelCancellationModal").addEventListener("click", closeCancellationModal);
+$("#cancellationForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!pendingCancellationAppointmentId) return;
+  const form = event.currentTarget;
+  const submitButton = form.querySelector('button[type="submit"]');
+  submitButton.disabled = true;
+  try {
+    await updateAppointmentStatus(
+      pendingCancellationAppointmentId,
+      "CANCELLED",
+      form.reason.value.trim()
+    );
+    await loadAppointmentsFromApi();
+    closeCancellationModal();
+    appointmentView = "history";
+    document.querySelectorAll("[data-appointment-view]").forEach(tab =>
+      tab.classList.toggle("active", tab.dataset.appointmentView === "history")
+    );
+    renderAll();
+    showToast("Cita cancelada");
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "No fue posible cancelar la cita");
+  } finally {
+    submitButton.disabled = false;
+  }
+});
 $("#customerSearch").addEventListener("input", renderCustomers);
 $("#salesDateFrom").addEventListener("change", renderSalesReport);
 $("#salesDateTo").addEventListener("change", renderSalesReport);
 $("#salesBarberFilter").addEventListener("change", renderSalesReport);
 $("#salesSearch").addEventListener("input", renderSalesReport);
+$("#cancellationSearch").addEventListener("input", renderCancellations);
 $("#appointmentForm").phone.addEventListener("input", () =>
   autofillCustomerByPhone($("#appointmentForm"))
 );
+$("#appointmentForm").date.addEventListener("change", updateAppointmentBarberOptions);
 $("#saleForm").phone.addEventListener("input", () =>
   autofillCustomerByPhone($("#saleForm"))
 );
@@ -1083,40 +1546,143 @@ document.querySelectorAll('input[name="birthDate"]').forEach(input => {
   });
 });
 
-$("#appointmentForm").addEventListener("submit", async event => {
+$("#openShiftForm").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.currentTarget;
+  const barberIds = [...form.querySelectorAll('input[name="barberIds"]:checked')]
+    .map(input => Number(input.value));
+  if (!barberIds.length) {
+    showToast("Selecciona al menos un barbero");
+    return;
+  }
   try {
-    const customer = await ensureCustomer(
-      form.customer.value,
-      form.phone.value,
-      form.birthDate.value
-    );
-    const response = await fetch(`${API_BASE_URL}/appointments`, {
+    const response = await fetch(`${API_BASE_URL}/shifts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        customer_id: Number(customer.id),
-        barber_id: Number(form.barber.value),
-        service_id: Number(form.serviceId.value),
-        appointment_date: form.date.value,
-        appointment_time: form.time.value
+        shift_type: form.shiftType.value,
+        opening_cash: Number(form.openingCash.value || 0),
+        barber_ids: barberIds
       })
     });
-    if (!response.ok) throw new Error("No fue posible guardar la cita");
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "No fue posible abrir el turno");
+    currentShift = result;
+    renderAll();
+    switchView("cashier");
+    showToast("Turno abierto correctamente");
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "No fue posible abrir el turno");
+  }
+});
+
+$("#expenseForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (!currentShift) return;
+  try {
+    const response = await fetch(`${API_BASE_URL}/shifts/${currentShift.id}/expenses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        concept: form.concept.value.trim(),
+        amount: Number(form.amount.value)
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "No fue posible registrar el gasto");
+    form.reset();
+    await loadCurrentShiftFromApi();
+    renderAll();
+    showToast("Gasto registrado");
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "No fue posible registrar el gasto");
+  }
+});
+
+$("#closeShiftForm").addEventListener("input", renderShift);
+$("#closeShiftForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!currentShift) return;
+  if (!window.confirm("¿Cerrar definitivamente este turno? Después no se podrán agregar ventas ni gastos.")) return;
+  const form = event.currentTarget;
+  try {
+    const response = await fetch(`${API_BASE_URL}/shifts/${currentShift.id}/close`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cash_counted: Number(form.cashCounted.value || 0),
+        card_reported: Number(form.cardReported.value || 0),
+        transfer_reported: Number(form.transferReported.value || 0)
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "No fue posible cerrar el turno");
+    currentShift = result;
+    printBlock(shiftTicket());
+    currentShift = null;
+    await loadShiftHistoryFromApi();
+    form.reset();
+    renderAll();
+    showToast("Turno cerrado correctamente");
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "No fue posible cerrar el turno");
+  }
+});
+
+$("#appointmentForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const appointmentId = form.appointmentId.value;
+  const submitButton = form.querySelector('button[type="submit"]');
+  const duplicate = appointmentConflicts(form, appointmentId || null);
+  if (duplicate) {
+    showToast("Ese barbero ya tiene una cita dentro de ese lapso de 15 minutos");
+    return;
+  }
+  submitButton.disabled = true;
+  try {
+    const customer = appointmentId
+      ? null
+      : await ensureCustomer(form.customer.value, form.phone.value, form.birthDate.value);
+    const response = await fetch(
+      appointmentId
+        ? `${API_BASE_URL}/appointments/${appointmentId}`
+        : `${API_BASE_URL}/appointments`, {
+      method: appointmentId ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(appointmentId
+        ? {
+            service_id: Number(form.serviceId.value),
+            appointment_date: form.date.value,
+            appointment_time: form.time.value
+          }
+        : {
+            customer_id: Number(customer.id),
+            barber_id: Number(form.barber.value),
+            service_id: Number(form.serviceId.value),
+            appointment_date: form.date.value,
+            appointment_time: form.time.value
+          })
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.detail || "No fue posible guardar la cita");
+    }
 
     await loadAppointmentsFromApi();
-    form.reset();
-    form.customer.readOnly = false;
-    delete form.customer.dataset.customerId;
-    form.date.value = todayISO();
-    form.time.value = nowTime();
+    resetAppointmentForm();
     saveState();
     renderAll();
-    showToast("Cita guardada");
+    showToast(appointmentId ? "Cita actualizada" : "Cita guardada");
   } catch (error) {
     console.error(error);
     showToast(error.message || "No se pudo registrar la cita");
+  } finally {
+    submitButton.disabled = false;
   }
 });
 
@@ -1230,6 +1796,7 @@ $("#saleForm").addEventListener("submit", async event => {
 
   const form = event.currentTarget;
   try {
+    if (!currentShift) throw new Error("Primero abre un turno en Corte de turno");
     const customer = await ensureCustomer(
       form.customer.value,
       form.phone.value,
@@ -1248,6 +1815,8 @@ $("#saleForm").addEventListener("submit", async event => {
         customer_id: customer ? Number(customer.id) : null,
         barber_id: Number(form.barber.value),
         appointment_id: pendingAppointmentId ? Number(pendingAppointmentId) : null,
+        shift_id: Number(currentShift.id),
+        receipt_number: Number(form.receiptNumber.value),
         discount: birthdayDiscount,
         birthday_service_id: birthdayDiscountServiceId
           ? Number(birthdayDiscountServiceId)
@@ -1271,7 +1840,11 @@ $("#saleForm").addEventListener("submit", async event => {
     form.customer.readOnly = false;
     delete form.customer.dataset.customerId;
     pendingAppointmentId = null;
-    await Promise.all([loadSalesFromApi(), loadAppointmentsFromApi()]);
+    await Promise.all([
+      loadSalesFromApi(),
+      loadAppointmentsFromApi(),
+      loadCurrentShiftFromApi()
+    ]);
     renderAll();
     printBlock(saleTicket(sale));
     showToast(customer ? "Venta y cliente guardados" : "Venta registrada");
@@ -1294,7 +1867,9 @@ async function initialize() {
       loadBarbersFromApi(),
       loadCustomersFromApi(),
       loadAppointmentsFromApi(),
-      loadSalesFromApi()
+      loadSalesFromApi(),
+      loadCurrentShiftFromApi(),
+      loadShiftHistoryFromApi()
     ]);
     renderAll();
   } catch (error) {
