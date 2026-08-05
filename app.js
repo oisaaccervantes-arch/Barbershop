@@ -49,6 +49,7 @@ let birthdayDiscountServiceId = null;
 let currentShift = null;
 let shiftHistory = [];
 let pendingCancellationAppointmentId = null;
+let pendingCloseShiftData = null;
 
 const appointmentStatusFromApi = {
   PENDING: "pendiente",
@@ -963,6 +964,7 @@ function historicalShiftDetail(shift, summary) {
           <div class="expense-line"><span>${escapeHtml(expense.concept)}</span><strong>-${money(expense.amount)}</strong></div>
         `).join("") || `<p class="muted">Sin gastos registrados.</p>`}
         <div class="cut-line total"><span>Total de gastos</span><strong>${money(summary.expenses)}</strong></div>
+        <div class="closing-notes"><strong>Notas del cierre</strong><p>${escapeHtml(shift.closing_notes || "Sin notas registradas.")}</p></div>
       </section>
       <section class="history-detail-card">
         <h4>Producción por barbero</h4>
@@ -1232,6 +1234,7 @@ function shiftTicket() {
     <p>Efectivo esperado: <strong>${money(expectedCash)}</strong><br>Efectivo contado: <strong>${money(currentShift?.cash_counted || 0)}</strong></p>
     <p>Tarjeta sistema/terminal: ${money(paymentTotal("CARD"))} / ${money(currentShift?.card_reported || 0)}<br>Transferencias sistema/verificadas: ${money(paymentTotal("TRANSFER"))} / ${money(currentShift?.transfer_reported || 0)}</p>
     <p>Gastos: <strong>${money(expenseTotal)}</strong></p>
+    <p>Notas: ${escapeHtml(currentShift?.closing_notes || "Sin notas")}</p>
     ${(currentShift?.expenses || []).map(expense => `<p>${escapeHtml(expense.concept)}: -${money(expense.amount)}</p>`).join("")}
     <hr>
     <h3>Total: ${money(total)}</h3>
@@ -1614,30 +1617,57 @@ $("#closeShiftForm").addEventListener("input", renderShift);
 $("#closeShiftForm").addEventListener("submit", async event => {
   event.preventDefault();
   if (!currentShift) return;
-  if (!window.confirm("¿Cerrar definitivamente este turno? Después no se podrán agregar ventas ni gastos.")) return;
   const form = event.currentTarget;
+  pendingCloseShiftData = {
+    cash_counted: Number(form.cashCounted.value || 0),
+    card_reported: Number(form.cardReported.value || 0),
+    transfer_reported: Number(form.transferReported.value || 0),
+    closing_notes: form.closingNotes.value.trim() || null
+  };
+  $("#closeShiftConfirmationSummary").innerHTML = `
+    <div class="cut-line"><span>Turno</span><strong>${currentShift.shift_type === "MORNING" ? "Matutino" : "Vespertino"}</strong></div>
+    <div class="cut-line"><span>Efectivo contado</span><strong>${money(pendingCloseShiftData.cash_counted)}</strong></div>
+    <div class="cut-line"><span>Corte de terminal</span><strong>${money(pendingCloseShiftData.card_reported)}</strong></div>
+    <div class="cut-line"><span>Transferencias</span><strong>${money(pendingCloseShiftData.transfer_reported)}</strong></div>
+    <div class="cut-line total"><span>Resultado</span><strong>${$("#reconciliationResult strong").textContent}</strong></div>
+    <div class="closing-notes"><strong>Notas</strong><p>${escapeHtml(pendingCloseShiftData.closing_notes || "Sin notas")}</p></div>
+  `;
+  $("#closeShiftModal").classList.remove("hidden");
+});
+
+function closeCloseShiftModal() {
+  pendingCloseShiftData = null;
+  $("#closeShiftModal").classList.add("hidden");
+}
+
+$("#closeShiftModalButton").addEventListener("click", closeCloseShiftModal);
+$("#cancelCloseShift").addEventListener("click", closeCloseShiftModal);
+$("#confirmCloseShift").addEventListener("click", async event => {
+  if (!currentShift || !pendingCloseShiftData) return;
+  const button = event.currentTarget;
+  button.disabled = true;
   try {
     const response = await fetch(`${API_BASE_URL}/shifts/${currentShift.id}/close`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        cash_counted: Number(form.cashCounted.value || 0),
-        card_reported: Number(form.cardReported.value || 0),
-        transfer_reported: Number(form.transferReported.value || 0)
-      })
+      body: JSON.stringify(pendingCloseShiftData)
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.detail || "No fue posible cerrar el turno");
     currentShift = result;
+    $("#closeShiftModal").classList.add("hidden");
     printBlock(shiftTicket());
     currentShift = null;
+    pendingCloseShiftData = null;
     await loadShiftHistoryFromApi();
-    form.reset();
+    $("#closeShiftForm").reset();
     renderAll();
     showToast("Turno cerrado correctamente");
   } catch (error) {
     console.error(error);
     showToast(error.message || "No fue posible cerrar el turno");
+  } finally {
+    button.disabled = false;
   }
 });
 

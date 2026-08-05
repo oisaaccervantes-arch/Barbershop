@@ -48,6 +48,7 @@ def serialize_shift(shift: CashShift, db: Session) -> dict:
         "cash_counted": shift.cash_counted,
         "card_reported": shift.card_reported,
         "transfer_reported": shift.transfer_reported,
+        "closing_notes": shift.closing_notes,
         "next_receipt_number": next_receipt_number(db),
         "barbers": [{"id": row.barber.id, "name": row.barber.name} for row in shift.barbers],
         "expenses": [
@@ -110,6 +111,7 @@ def close_shift(shift_id: int, payload: CashShiftClose, db: DatabaseSession):
     shift.cash_counted = payload.cash_counted
     shift.card_reported = payload.card_reported
     shift.transfer_reported = payload.transfer_reported
+    shift.closing_notes = " ".join(payload.closing_notes.split()) if payload.closing_notes else None
     shift.status = "CLOSED"
     shift.closed_at = datetime.now(LOCAL_ZONE)
     db.commit()

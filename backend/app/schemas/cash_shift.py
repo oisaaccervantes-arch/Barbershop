@@ -39,6 +39,7 @@ class CashShiftClose(BaseModel):
     cash_counted: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
     card_reported: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
     transfer_reported: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
+    closing_notes: str | None = Field(default=None, max_length=1000)
 
 
 class CashShiftRead(BaseModel):
@@ -52,6 +53,7 @@ class CashShiftRead(BaseModel):
     cash_counted: Decimal | None
     card_reported: Decimal | None
     transfer_reported: Decimal | None
+    closing_notes: str | None
     next_receipt_number: int
     barbers: list[ShiftBarberRead]
     expenses: list[ShiftExpenseRead]

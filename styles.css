@@ -602,6 +602,25 @@ td small { color: var(--muted); }
 
 .danger-button { background: #a52b1b; }
 
+.close-shift-confirmation {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.closing-notes {
+  margin-top: 13px;
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+}
+
+.closing-notes p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
 .cancellations-panel { margin-top: 18px; }
 .cancellations-panel,
 #salesReportPanel { scroll-margin-top: 18px; }

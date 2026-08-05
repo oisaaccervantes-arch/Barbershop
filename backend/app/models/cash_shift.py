@@ -25,6 +25,7 @@ class CashShift(Base):
     cash_counted: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     card_reported: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     transfer_reported: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    closing_notes: Mapped[str | None] = mapped_column(String(1000))
 
     barbers = relationship("ShiftBarber", back_populates="shift", cascade="all, delete-orphan")
     sales = relationship("Sale", back_populates="shift")

@@ -521,6 +521,10 @@
               <label>Transferencias verificadas
                 <input name="transferReported" type="number" min="0" step="0.01" value="0" required>
               </label>
+              <label>Notas del cierre (opcional)
+                <textarea name="closingNotes" maxlength="1000" rows="3"
+                  placeholder="Ej. Faltaron $50 y se revisará con recepción"></textarea>
+              </label>
             </form>
           </div>
 
@@ -598,6 +602,28 @@
       </div>
     </section>
   </main>
+
+  <div class="modal-backdrop hidden" id="closeShiftModal">
+    <div class="modal-card">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Corte de turno</p>
+          <h3>Confirmar cierre</h3>
+        </div>
+        <button class="icon-button" id="closeShiftModalButton" type="button" title="Cerrar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <p>El turno quedará cerrado definitivamente y ya no aceptará ventas ni gastos.</p>
+      <div class="close-shift-confirmation" id="closeShiftConfirmationSummary"></div>
+      <div class="modal-actions">
+        <button class="secondary-button" id="cancelCloseShift" type="button">Volver</button>
+        <button class="submit-button danger-button" id="confirmCloseShift" type="button">
+          Cerrar e imprimir
+        </button>
+      </div>
+    </div>
+  </div>
 
   <div class="modal-backdrop hidden" id="cancellationModal">
     <form class="modal-card" id="cancellationForm">
