@@ -1115,6 +1115,8 @@ function renderCancellations() {
   const withReason = allCancellations.filter(item => item.cancellationNote).length;
   $("#cancellationSummary").textContent =
     `${allCancellations.length} cancelaciones · ${withReason} con motivo registrado`;
+  $("#cancellationJumpLabel").textContent =
+    `Ver cancelaciones (${allCancellations.length})`;
   $("#cancellationRows").innerHTML = cancellations.map(appointment => {
     const cancelledDate = appointment.cancelledAt
       ? new Date(appointment.cancelledAt).toLocaleString("es-MX", {
@@ -1530,6 +1532,12 @@ $("#salesDateTo").addEventListener("change", renderSalesReport);
 $("#salesBarberFilter").addEventListener("change", renderSalesReport);
 $("#salesSearch").addEventListener("input", renderSalesReport);
 $("#cancellationSearch").addEventListener("input", renderCancellations);
+$("#goToCancellations").addEventListener("click", () =>
+  $(".cancellations-panel").scrollIntoView({ behavior: "smooth", block: "start" })
+);
+$("#backToSales").addEventListener("click", () =>
+  $("#salesReportPanel").scrollIntoView({ behavior: "smooth", block: "start" })
+);
 $("#appointmentForm").phone.addEventListener("input", () =>
   autofillCustomerByPhone($("#appointmentForm"))
 );

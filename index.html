@@ -384,12 +384,16 @@
 
     <section class="view" id="sales">
       <div class="workspace">
-        <div class="panel">
+        <div class="panel" id="salesReportPanel">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Historial</p>
               <h3>Ventas por periodo</h3>
             </div>
+            <button class="chip-button cancellation-jump" id="goToCancellations" type="button">
+              <span class="material-symbols-outlined">event_busy</span>
+              <span id="cancellationJumpLabel">Ver cancelaciones</span>
+            </button>
           </div>
 
           <div class="report-filters">
@@ -434,8 +438,14 @@
               <h3>Cancelaciones de citas</h3>
               <p id="cancellationSummary">0 cancelaciones registradas</p>
             </div>
-            <input class="search" id="cancellationSearch"
-              placeholder="Buscar cliente, barbero o motivo">
+            <div class="cancellation-header-actions">
+              <button class="chip-button" id="backToSales" type="button">
+                <span class="material-symbols-outlined">arrow_upward</span>
+                Volver a ventas
+              </button>
+              <input class="search" id="cancellationSearch"
+                placeholder="Buscar cliente, barbero o motivo">
+            </div>
           </div>
           <div class="table-wrap">
             <table>

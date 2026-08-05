@@ -603,6 +603,18 @@ td small { color: var(--muted); }
 .danger-button { background: #a52b1b; }
 
 .cancellations-panel { margin-top: 18px; }
+.cancellations-panel,
+#salesReportPanel { scroll-margin-top: 18px; }
+
+.cancellation-jump,
+.cancellation-header-actions,
+.cancellation-header-actions .chip-button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.cancellation-header-actions { gap: 10px; }
 
 #cancellationRows td > small {
   display: block;
