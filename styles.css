@@ -771,6 +771,15 @@ td small { color: var(--muted); }
   }
 }
 
+.cancelled-sale {
+  opacity: .7;
+  background: #fff5f3;
+}
+
+.cancelled-sale > td:not(:last-child) {
+  text-decoration-color: #b42318;
+}
+
 @media print {
   body * { visibility: hidden; }
   .print-area, .print-area * { visibility: visible; }

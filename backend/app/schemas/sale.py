@@ -37,6 +37,10 @@ class SaleCreate(BaseModel):
     payments: list[PaymentCreate] = Field(min_length=1)
 
 
+class SaleCancel(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class SaleItemRead(BaseModel):
     id: int
     service_id: int
@@ -70,6 +74,8 @@ class SaleRead(BaseModel):
     discount_reason: str | None
     total: Decimal
     status: str
+    cancellation_reason: str | None
+    cancelled_at: datetime | None
     sold_at: datetime
     items: list[SaleItemRead]
     payments: list[PaymentRead]

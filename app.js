@@ -223,6 +223,9 @@ function mapSaleFromApi(sale) {
     receiptNumber: sale.receipt_number,
     discount: Number(sale.discount || 0),
     discountReason: sale.discount_reason || null,
+    status: sale.status || "COMPLETED",
+    cancellationReason: sale.cancellation_reason || "",
+    cancelledAt: sale.cancelled_at || null,
     payment: sale.payments.length > 1
       ? "Mixto"
       : paymentMethodLabels[sale.payments[0]?.method] || "Sin pago",
@@ -608,7 +611,9 @@ function updateAppointmentBarberOptions() {
 function renderShell() {
   const formatter = new Intl.DateTimeFormat("es-MX", { weekday: "long", day: "numeric", month: "long" });
   $("#todayLabel").textContent = formatter.format(new Date());
-  const salesToday = state.sales.filter(sale => sale.date === todayISO());
+  const salesToday = state.sales.filter(sale =>
+    sale.date === todayISO() && sale.status === "COMPLETED"
+  );
   $("#todaySales").textContent = money(salesToday.reduce((sum, sale) => sum + sale.total, 0));
   $("#activeAppointments").textContent = state.appointments.filter(item => !["atendida", "cancelada"].includes(item.status)).length;
 }
@@ -782,7 +787,9 @@ function renderCart() {
 
 function renderShift() {
   const shiftSales = state.sales
-    .filter(sale => currentShift && sale.shiftId === String(currentShift.id))
+    .filter(sale => currentShift
+      && sale.shiftId === String(currentShift.id)
+      && sale.status === "COMPLETED")
     .sort((a, b) =>
       `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)
   );
@@ -893,7 +900,7 @@ function renderShift() {
 
 function shiftFinancialSummary(shift) {
   const sales = state.sales
-    .filter(sale => sale.shiftId === String(shift.id))
+    .filter(sale => sale.shiftId === String(shift.id) && sale.status === "COMPLETED")
     .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
   const byMethod = method => roundMoney(sales.reduce(
     (sum, sale) => sum + sale.payments
@@ -1040,7 +1047,7 @@ function renderSalesReport() {
   const dateTo = $("#salesDateTo").value;
   const barberId = $("#salesBarberFilter").value;
   const query = $("#salesSearch").value.trim().toLowerCase();
-  const sales = state.sales
+  const matchingSales = state.sales
     .filter(sale => !dateFrom || sale.date >= dateFrom)
     .filter(sale => !dateTo || sale.date <= dateTo)
     .filter(sale => barberId === "ALL" || sale.barberId === barberId)
@@ -1058,6 +1065,7 @@ function renderSalesReport() {
     .sort((a, b) =>
       `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)
     );
+  const sales = matchingSales.filter(sale => sale.status === "COMPLETED");
 
   const paymentTotal = method => sales.reduce(
     (sum, sale) => sum + (sale.payments || [])
@@ -1077,8 +1085,8 @@ function renderSalesReport() {
     `<div class="summary-card"><span>${label}</span><strong>${value}</strong></div>`
   ).join("");
 
-  $("#salesReportRows").innerHTML = sales.map(sale => `
-    <tr>
+  $("#salesReportRows").innerHTML = matchingSales.map(sale => `
+    <tr class="${sale.status === "CANCELLED" ? "cancelled-sale" : ""}">
       <td>${sale.date}<br><small>${sale.time}</small></td>
       <td><strong>${sale.receiptNumber ?? escapeHtml((sale.folio || sale.id).slice(0, 8).toUpperCase())}</strong></td>
       <td>${escapeHtml(sale.customer || "Público general")}</td>
@@ -1087,11 +1095,17 @@ function renderSalesReport() {
       ).join("<br>")}</td>
       <td>${escapeHtml(sale.barber)}</td>
       <td>${escapeHtml(sale.payment)}</td>
-      <td><strong>${money(sale.total)}</strong></td>
       <td>
-        <button class="chip-button" type="button" data-reprint-sale="${sale.id}">
-          Reimprimir
-        </button>
+        <strong>${money(sale.total)}</strong>
+        ${sale.status === "CANCELLED"
+          ? `<small class="cancellation-note">Cancelada: ${escapeHtml(sale.cancellationReason)}</small>`
+          : ""}
+      </td>
+      <td>
+        ${sale.status === "COMPLETED" ? `
+          <button class="chip-button" type="button" data-reprint-sale="${sale.id}">Reimprimir</button>
+          <button class="chip-button danger" type="button" data-cancel-sale="${sale.id}">Cancelar</button>
+        ` : `<span class="status cancelada">cancelada</span>`}
       </td>
     </tr>
   `).join("") || `<tr><td colspan="8">No hay ventas en el periodo seleccionado.</td></tr>`;
@@ -1206,7 +1220,9 @@ function saleTicket(sale) {
 
 function shiftTicket() {
   const salesToday = state.sales
-    .filter(sale => currentShift && sale.shiftId === String(currentShift.id))
+    .filter(sale => currentShift
+      && sale.shiftId === String(currentShift.id)
+      && sale.status === "COMPLETED")
     .sort((a, b) =>
       `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)
     );
@@ -1261,6 +1277,18 @@ document.addEventListener("click", async event => {
   if (reprintSale) {
     const sale = state.sales.find(item => item.id === reprintSale.dataset.reprintSale);
     if (sale) printBlock(saleTicket(sale));
+  }
+
+  const cancelSale = event.target.closest("[data-cancel-sale]");
+  if (cancelSale) {
+    const sale = state.sales.find(item => item.id === cancelSale.dataset.cancelSale);
+    if (!sale) return;
+    $("#saleCancellationForm").dataset.saleId = sale.id;
+    $("#saleCancellationLabel").textContent =
+      `Folio ${sale.receiptNumber ?? sale.folio.slice(0, 8)} · ${sale.customer || "Público general"} · ${money(sale.total)}`;
+    $("#saleCancellationForm").reset();
+    $("#saleCancellationModal").classList.remove("hidden");
+    $("#saleCancellationForm").reason.focus();
   }
 
   const reprintShift = event.target.closest("[data-print-shift]");
@@ -1535,6 +1563,43 @@ $("#salesDateTo").addEventListener("change", renderSalesReport);
 $("#salesBarberFilter").addEventListener("change", renderSalesReport);
 $("#salesSearch").addEventListener("input", renderSalesReport);
 $("#cancellationSearch").addEventListener("input", renderCancellations);
+
+function closeSaleCancellationModal() {
+  $("#saleCancellationForm").reset();
+  $("#saleCancellationModal").classList.add("hidden");
+  delete $("#saleCancellationForm").dataset.saleId;
+}
+
+$("#closeSaleCancellationModal").addEventListener("click", closeSaleCancellationModal);
+$("#cancelSaleCancellationModal").addEventListener("click", closeSaleCancellationModal);
+$("#saleCancellationForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const saleId = form.dataset.saleId;
+  const reason = form.reason.value.trim();
+  if (!saleId || !reason) return;
+  const submitButton = form.querySelector('button[type="submit"]');
+  submitButton.disabled = true;
+  try {
+    const response = await fetch(`${API_BASE_URL}/sales/${saleId}/cancel`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason })
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.detail || "No fue posible cancelar la venta");
+    }
+    await Promise.all([loadSalesFromApi(), loadCurrentShiftFromApi(), loadShiftHistoryFromApi()]);
+    closeSaleCancellationModal();
+    renderAll();
+    showToast("Venta cancelada y conservada en el historial");
+  } catch (error) {
+    showToast(error.message || "No fue posible cancelar la venta");
+  } finally {
+    submitButton.disabled = false;
+  }
+});
 $("#goToCancellations").addEventListener("click", () =>
   $(".cancellations-panel").scrollIntoView({ behavior: "smooth", block: "start" })
 );

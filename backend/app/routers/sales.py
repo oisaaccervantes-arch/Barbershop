@@ -15,7 +15,7 @@ from app.models.customer import Customer
 from app.models.cash_shift import CashShift, ShiftBarber
 from app.models.sale import Payment, Sale, SaleItem
 from app.models.service import Service
-from app.schemas.sale import PaymentMethod, SaleCreate, SaleRead
+from app.schemas.sale import PaymentMethod, SaleCancel, SaleCreate, SaleRead
 
 
 router = APIRouter(prefix="/api/sales", tags=["sales"])
@@ -39,6 +39,8 @@ def serialize_sale(sale: Sale) -> dict:
         "discount_reason": sale.discount_reason,
         "total": sale.total,
         "status": sale.status,
+        "cancellation_reason": sale.cancellation_reason,
+        "cancelled_at": sale.cancelled_at,
         "sold_at": sale.sold_at,
         "items": [
             {
@@ -78,6 +80,30 @@ def sale_query():
 def list_sales(db: DatabaseSession):
     sales = db.scalars(sale_query().order_by(Sale.sold_at.desc(), Sale.id.desc()))
     return [serialize_sale(sale) for sale in sales.unique().all()]
+
+
+@router.patch("/{sale_id}/cancel", response_model=SaleRead)
+def cancel_sale(sale_id: int, payload: SaleCancel, db: DatabaseSession):
+    sale = db.scalar(sale_query().where(Sale.id == sale_id))
+    if sale is None:
+        raise HTTPException(status_code=404, detail="La venta no existe")
+    if sale.status == "CANCELLED":
+        raise HTTPException(status_code=409, detail="La venta ya fue cancelada")
+    if sale.shift is None or sale.shift.status != "OPEN":
+        raise HTTPException(
+            status_code=409,
+            detail="No se puede cancelar una venta de un turno cerrado",
+        )
+    reason = " ".join(payload.reason.split())
+    if not reason:
+        raise HTTPException(status_code=400, detail="Es necesario escribir el motivo")
+
+    sale.status = "CANCELLED"
+    sale.cancellation_reason = reason
+    sale.cancelled_at = datetime.now(ZoneInfo("America/Hermosillo"))
+    db.commit()
+    saved_sale = db.scalar(sale_query().where(Sale.id == sale.id))
+    return serialize_sale(saved_sale)
 
 
 @router.post("", response_model=SaleRead, status_code=status.HTTP_201_CREATED)

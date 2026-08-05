@@ -648,6 +648,30 @@
     </form>
   </div>
 
+  <div class="modal-backdrop hidden" id="saleCancellationModal">
+    <form class="modal-card" id="saleCancellationForm">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Ventas</p>
+          <h3>Cancelar venta</h3>
+        </div>
+        <button class="icon-button" id="closeSaleCancellationModal" type="button" title="Cerrar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <p id="saleCancellationLabel"></p>
+      <p>La venta conservará su folio y sus datos, pero dejará de sumar en el corte.</p>
+      <label>Motivo de la cancelación
+        <textarea name="reason" maxlength="500" rows="4"
+          placeholder="Ej. Se registró un servicio incorrecto" required></textarea>
+      </label>
+      <div class="modal-actions">
+        <button class="secondary-button" id="cancelSaleCancellationModal" type="button">Volver</button>
+        <button class="submit-button danger-button" type="submit">Confirmar cancelación</button>
+      </div>
+    </form>
+  </div>
+
   <div class="toast" id="toast"></div>
   <datalist id="customerPhoneOptions"></datalist>
   <script src="app.js"></script>
