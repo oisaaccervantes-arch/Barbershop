@@ -107,12 +107,6 @@ def list_shifts(db: DatabaseSession):
 def open_shift(payload: CashShiftCreate, db: DatabaseSession):
     if db.scalar(select(CashShift.id).where(CashShift.status == "OPEN").limit(1)):
         raise HTTPException(status_code=409, detail="Ya existe un turno abierto")
-    expected_receipt = next_global_receipt_number(db)
-    if expected_receipt is not None and payload.starting_receipt_number != expected_receipt:
-        raise HTTPException(
-            status_code=409,
-            detail=f"El siguiente folio disponible es {expected_receipt}",
-        )
     barber_ids = list(dict.fromkeys(payload.barber_ids))
     barbers = db.scalars(select(Barber).where(Barber.id.in_(barber_ids), Barber.active.is_(True))).all()
     if len(barbers) != len(barber_ids):

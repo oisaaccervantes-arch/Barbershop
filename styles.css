@@ -876,34 +876,6 @@ td small { color: var(--muted); }
   font-weight: 700;
 }
 
-.receipt-suggestion-row {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) 180px;
-  gap: 10px;
-}
-
-.receipt-suggestion {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 7px 14px;
-  border: 1px solid #dfc978;
-  border-radius: 7px;
-  background: #fff3c7;
-}
-
-.receipt-suggestion small {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.receipt-suggestion strong { font-size: 22px; }
-
-@media (max-width: 720px) {
-  .receipt-suggestion-row { grid-template-columns: 1fr; }
-}
 .service-picker {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -971,4 +943,54 @@ td small { color: var(--muted); }
   justify-content: space-between;
   margin-top: 16px;
   padding-top: 14px;
+}
+
+.sales-charts-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 20px 0 24px;
+}
+.sales-chart-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  min-height: 290px;
+  padding: 18px;
+}
+.sales-chart-card h4 { font-size: 1.2rem; margin: 3px 0 18px; }
+.daily-sales-chart {
+  align-items: end;
+  display: flex;
+  gap: 10px;
+  height: 205px;
+  overflow-x: auto;
+  padding-top: 24px;
+}
+.daily-bar-column {
+  align-items: center;
+  display: flex;
+  flex: 1 0 54px;
+  flex-direction: column;
+  height: 100%;
+  justify-content: end;
+}
+.daily-bar-value { font-size: .75rem; font-weight: 700; margin-bottom: 5px; white-space: nowrap; }
+.daily-bar {
+  background: var(--gold);
+  border-radius: 7px 7px 2px 2px;
+  min-height: 4px;
+  width: min(44px, 75%);
+}
+.daily-bar-label { color: var(--muted); font-size: .76rem; margin-top: 7px; white-space: nowrap; }
+.barber-production-chart { display: grid; gap: 16px; }
+.production-chart-row { display: grid; gap: 6px; }
+.production-chart-heading { display: flex; gap: 12px; justify-content: space-between; }
+.production-chart-heading span { color: var(--muted); font-size: .8rem; }
+.production-track { background: var(--paper); border-radius: 999px; height: 14px; overflow: hidden; }
+.production-fill { background: var(--gold); border-radius: inherit; height: 100%; min-width: 4px; }
+.chart-empty { color: var(--muted); margin: 60px 0; text-align: center; }
+
+@media (max-width: 900px) {
+  .sales-charts-grid { grid-template-columns: 1fr; }
 }

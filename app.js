@@ -304,11 +304,9 @@ async function loadSuggestedReceiptFromApi() {
   suggestedStartingReceipt = await response.json();
   const input = $("#openShiftForm").startingReceiptNumber;
   input.value = suggestedStartingReceipt.next_receipt_number;
-  input.readOnly = !suggestedStartingReceipt.can_choose;
-  $("#suggestedReceiptValue").textContent = suggestedStartingReceipt.next_receipt_number;
-  $("#startingReceiptHelp").textContent = suggestedStartingReceipt.can_choose
-    ? "No hay ventas anteriores: puedes elegir el primer folio"
-    : `Siguiente folio disponible: ${suggestedStartingReceipt.next_receipt_number}`;
+  input.readOnly = false;
+  $("#startingReceiptHelp").textContent =
+    `Sugerido: ${suggestedStartingReceipt.next_receipt_number}. Puedes modificarlo antes de abrir el turno.`;
 }
 
 async function updateAppointmentStatus(appointmentId, status, cancellationNote = null, barberId = null, serviceIds = []) {
@@ -1184,6 +1182,50 @@ function updateReconciliation(expectedCash, expectedCard, expectedTransfer) {
       : `<span>Diferencia total</span><strong>Sobran ${money(difference)}</strong>`;
 }
 
+function renderSalesCharts(sales) {
+  const dailyTotals = new Map();
+  const barberTotals = new Map();
+  sales.forEach(sale => {
+    dailyTotals.set(sale.date, (dailyTotals.get(sale.date) || 0) + sale.total);
+    const barber = barberTotals.get(sale.barberId) || {
+      name: sale.barber,
+      total: 0,
+      services: 0
+    };
+    barber.total += sale.total;
+    barber.services += sale.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+    barberTotals.set(sale.barberId, barber);
+  });
+
+  const days = [...dailyTotals.entries()].sort(([dateA], [dateB]) => dateA.localeCompare(dateB));
+  const maxDaily = Math.max(0, ...days.map(([, total]) => total));
+  $("#dailySalesChart").innerHTML = days.map(([date, total]) => {
+    const [, month, day] = date.split("-");
+    const height = maxDaily ? Math.max(3, (total / maxDaily) * 145) : 3;
+    return `
+      <div class="daily-bar-column" title="${date}: ${money(total)}">
+        <span class="daily-bar-value">${money(total)}</span>
+        <div class="daily-bar" style="height:${height}px"></div>
+        <span class="daily-bar-label">${day}/${month}</span>
+      </div>
+    `;
+  }).join("") || `<p class="chart-empty">No hay ventas para graficar.</p>`;
+
+  const barbers = [...barberTotals.values()].sort((a, b) => b.total - a.total);
+  const maxBarber = Math.max(0, ...barbers.map(barber => barber.total));
+  $("#barberProductionChart").innerHTML = barbers.map(barber => `
+    <div class="production-chart-row">
+      <div class="production-chart-heading">
+        <strong>${escapeHtml(barber.name)}</strong>
+        <span>${barber.services} servicio${barber.services === 1 ? "" : "s"} · ${money(barber.total)}</span>
+      </div>
+      <div class="production-track">
+        <div class="production-fill" style="width:${maxBarber ? (barber.total / maxBarber) * 100 : 0}%"></div>
+      </div>
+    </div>
+  `).join("") || `<p class="chart-empty">No hay producción para graficar.</p>`;
+}
+
 function renderSalesReport() {
   const dateFrom = $("#salesDateFrom").value;
   const dateTo = $("#salesDateTo").value;
@@ -1226,6 +1268,8 @@ function renderSalesReport() {
   ].map(([label, value]) =>
     `<div class="summary-card"><span>${label}</span><strong>${value}</strong></div>`
   ).join("");
+
+  renderSalesCharts(sales);
 
   $("#salesReportRows").innerHTML = matchingSales.map(sale => `
     <tr class="${sale.status === "CANCELLED" ? "cancelled-sale" : ""}">

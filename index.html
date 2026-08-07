@@ -483,6 +483,17 @@
 
           <div class="summary-grid" id="salesReportSummary"></div>
 
+          <div class="sales-charts-grid">
+            <section class="sales-chart-card">
+              <div><p class="eyebrow">Tendencia</p><h4>Ventas por día</h4></div>
+              <div class="daily-sales-chart" id="dailySalesChart"></div>
+            </section>
+            <section class="sales-chart-card">
+              <div><p class="eyebrow">Equipo</p><h4>Producción por barbero</h4></div>
+              <div class="barber-production-chart" id="barberProductionChart"></div>
+            </section>
+          </div>
+
           <div class="table-wrap">
             <table>
               <thead>
@@ -556,14 +567,8 @@
               <input name="openingCash" type="number" min="0" step="0.01" value="0" required>
             </label>
             <label>Folio inicial
-              <span class="receipt-suggestion-row">
-                <input name="startingReceiptNumber" type="number" min="0" max="10000" step="1" value="0" required>
-                <span class="receipt-suggestion">
-                  <small>Folio sugerido</small>
-                  <strong id="suggestedReceiptValue">Consultando…</strong>
-                </span>
-              </span>
-              <small id="startingReceiptHelp">El sistema consultará el siguiente folio disponible</small>
+              <input name="startingReceiptNumber" type="number" min="0" max="10000" step="1" value="0" required>
+              <small id="startingReceiptHelp">Se colocará automáticamente el siguiente folio sugerido, pero puedes cambiarlo.</small>
             </label>
           </div>
           <label>Recepcionista responsable
