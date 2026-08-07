@@ -14,20 +14,26 @@ class AppointmentStatus(str, Enum):
 
 class AppointmentCreate(BaseModel):
     customer_id: int
-    barber_id: int
-    service_id: int
+    barber_id: int | None = None
+    service_id: int | None = None
+    service_ids: list[int] = Field(default_factory=list)
     appointment_date: date
     appointment_time: time
 
 
 class AppointmentUpdate(BaseModel):
-    service_id: int
+    barber_id: int | None = None
+    service_id: int | None = None
+    service_ids: list[int] = Field(default_factory=list)
     appointment_date: date
     appointment_time: time
 
 
 class AppointmentStatusUpdate(BaseModel):
     status: AppointmentStatus
+    barber_id: int | None = None
+    service_id: int | None = None
+    service_ids: list[int] = Field(default_factory=list)
     cancellation_note: str | None = Field(default=None, max_length=500)
 
 
@@ -39,13 +45,15 @@ class AppointmentRead(BaseModel):
     customer_name: str
     customer_phone: str
     customer_birth_date: date | None
-    barber_id: int
-    barber_name: str
-    service_id: int
-    service_name: str
+    barber_id: int | None
+    barber_name: str | None
+    service_id: int | None
+    service_name: str | None
+    service_ids: list[int]
+    service_names: list[str]
     appointment_date: date
     appointment_time: time
-    price: Decimal
+    price: Decimal | None
     status: AppointmentStatus
     cancellation_note: str | None
     cancelled_at: datetime | None

@@ -1,5 +1,12 @@
 const STORE_KEY = "bizantino-barberia-v1";
 const API_BASE_URL = "http://127.0.0.1:8000/api";
+const originalFetch = window.fetch.bind(window);
+window.fetch = async (input, init = {}) => {
+  const response = await originalFetch(input, { ...init, credentials: "include" });
+  const url = typeof input === "string" ? input : input.url;
+  if (response.status === 401 && !url.endsWith("/auth/login")) showLogin();
+  return response;
+};
 
 const serviceTypeToApi = {
   Servicio: "SERVICE",
@@ -42,6 +49,7 @@ let state = loadState();
 let cart = [];
 let catalogServices = [];
 let catalogBarbers = [];
+let catalogReceptionists = [];
 let catalogCustomers = [];
 let pendingAppointmentId = null;
 let appointmentView = "active";
@@ -49,7 +57,14 @@ let birthdayDiscountServiceId = null;
 let currentShift = null;
 let shiftHistory = [];
 let pendingCancellationAppointmentId = null;
+let pendingConfirmationAppointmentId = null;
+let appointmentSelectedServiceIds = [];
+let confirmationSelectedServiceIds = [];
+let servicePickerTarget = null;
+let servicePickerDraftIds = new Set();
 let pendingCloseShiftData = null;
+let authenticatedUser = null;
+let suggestedStartingReceipt = null;
 
 const appointmentStatusFromApi = {
   PENDING: "pendiente",
@@ -163,6 +178,16 @@ async function loadBarbersFromApi() {
   saveState();
 }
 
+async function loadReceptionistsFromApi() {
+  const response = await fetch(`${API_BASE_URL}/receptionists`);
+  if (!response.ok) throw new Error("No fue posible consultar las recepcionistas");
+  catalogReceptionists = (await response.json()).map(receptionist => ({
+    id: String(receptionist.id),
+    name: receptionist.name,
+    active: receptionist.active
+  }));
+}
+
 async function loadCustomersFromApi() {
   const response = await fetch(`${API_BASE_URL}/customers`);
   if (!response.ok) throw new Error("No fue posible consultar los clientes");
@@ -191,11 +216,16 @@ async function loadAppointmentsFromApi() {
     birthDate: appointment.customer_birth_date || "",
     date: appointment.appointment_date,
     time: appointment.appointment_time.slice(0, 5),
-    barberId: String(appointment.barber_id),
-    barber: appointment.barber_name,
-    serviceId: String(appointment.service_id),
-    serviceName: appointment.service_name,
-    price: Number(appointment.price),
+    barberId: appointment.barber_id ? String(appointment.barber_id) : null,
+    barber: appointment.barber_name || "Por asignar",
+    serviceIds: (appointment.service_ids || []).map(String),
+    serviceId: appointment.service_ids?.length
+      ? String(appointment.service_ids[0])
+      : (appointment.service_id ? String(appointment.service_id) : null),
+    serviceName: appointment.service_names?.length
+      ? appointment.service_names.join(", ")
+      : (appointment.service_name || "Por definir"),
+    price: appointment.price === null ? null : Number(appointment.price),
     status: appointmentStatusFromApi[appointment.status],
     cancellationNote: appointment.cancellation_note || "",
     cancelledAt: appointment.cancelled_at || null
@@ -268,7 +298,20 @@ async function loadShiftHistoryFromApi() {
   shiftHistory = await response.json();
 }
 
-async function updateAppointmentStatus(appointmentId, status, cancellationNote = null) {
+async function loadSuggestedReceiptFromApi() {
+  const response = await fetch(`${API_BASE_URL}/shifts/next-receipt`);
+  if (!response.ok) throw new Error("No fue posible consultar el siguiente folio");
+  suggestedStartingReceipt = await response.json();
+  const input = $("#openShiftForm").startingReceiptNumber;
+  input.value = suggestedStartingReceipt.next_receipt_number;
+  input.readOnly = !suggestedStartingReceipt.can_choose;
+  $("#suggestedReceiptValue").textContent = suggestedStartingReceipt.next_receipt_number;
+  $("#startingReceiptHelp").textContent = suggestedStartingReceipt.can_choose
+    ? "No hay ventas anteriores: puedes elegir el primer folio"
+    : `Siguiente folio disponible: ${suggestedStartingReceipt.next_receipt_number}`;
+}
+
+async function updateAppointmentStatus(appointmentId, status, cancellationNote = null, barberId = null, serviceIds = []) {
   const response = await fetch(
     `${API_BASE_URL}/appointments/${appointmentId}/status`,
     {
@@ -276,11 +319,16 @@ async function updateAppointmentStatus(appointmentId, status, cancellationNote =
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         status,
-        cancellation_note: cancellationNote
+        cancellation_note: cancellationNote,
+        barber_id: barberId ? Number(barberId) : null,
+        service_ids: serviceIds.map(Number)
       })
     }
   );
-  if (!response.ok) throw new Error("No fue posible actualizar la cita");
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.detail || "No fue posible actualizar la cita");
+  }
 }
 
 async function ensureCustomer(name, phone, birthDate = "") {
@@ -377,6 +425,7 @@ function resetAppointmentForm() {
   form.date.value = todayISO();
   form.time.value = nowTime();
   updateAppointmentBarberOptions();
+  renderAppointmentServiceOptions();
   $("#appointmentFormTitle").textContent = "Nueva cita";
   $("#appointmentSubmitLabel").textContent = "Guardar cita";
   $("#cancelAppointmentEdit").classList.add("hidden");
@@ -388,6 +437,7 @@ function timeToMinutes(value) {
 }
 
 function appointmentConflicts(form, excludeId = null) {
+  if (!form.barber.value) return null;
   const requestedStart = timeToMinutes(form.time.value);
   const requestedEnd = requestedStart + 15;
   return state.appointments.find(appointment => {
@@ -409,6 +459,15 @@ function resetBarberForm() {
   $("#barberFormTitle").textContent = "Agregar barbero";
   $("#barberSubmitLabel").textContent = "Agregar";
   $("#cancelBarberEdit").classList.add("hidden");
+}
+
+function resetReceptionistForm() {
+  const form = $("#receptionistForm");
+  form.reset();
+  form.receptionistId.value = "";
+  $("#receptionistFormTitle").textContent = "Agregar recepcionista";
+  $("#receptionistSubmitLabel").textContent = "Agregar";
+  $("#cancelReceptionistEdit").classList.add("hidden");
 }
 
 function resetCustomerForm() {
@@ -551,6 +610,7 @@ function showToast(message) {
 
 function renderSelects() {
   document.querySelectorAll('select[name="barber"]').forEach(select => {
+    if (select.closest("#appointmentForm") || select.closest("#appointmentConfirmationForm")) return;
     const barbers = catalogBarbers.length
       ? catalogBarbers.filter(barber => barber.active)
       : state.barbers.map(name => ({ id: name, name }));
@@ -567,10 +627,7 @@ function renderSelects() {
   }
   updateAppointmentBarberOptions();
 
-  const serviceOptions = state.services
-    .map(service => `<option value="${service.id}">${service.name} - ${money(service.price)}</option>`)
-    .join("");
-  $('select[name="serviceId"]').innerHTML = serviceOptions;
+  renderAppointmentServiceOptions();
 
   $("#customerPhoneOptions").innerHTML = (state.customers || [])
     .map(customer =>
@@ -589,6 +646,69 @@ function renderSelects() {
   if ([...barberFilter.options].some(option => option.value === selectedBarber)) {
     barberFilter.value = selectedBarber;
   }
+
+  const receptionistSelect = $("#shiftReceptionistSelect");
+  const selectedReceptionist = receptionistSelect.value;
+  receptionistSelect.innerHTML = `
+    <option value="">Selecciona una recepcionista</option>
+    ${catalogReceptionists.filter(item => item.active).map(item =>
+      `<option value="${item.id}">${escapeHtml(item.name)}</option>`
+    ).join("")}
+  `;
+  if ([...receptionistSelect.options].some(option => option.value === selectedReceptionist)) {
+    receptionistSelect.value = selectedReceptionist;
+  }
+}
+
+function serviceSelectionSummary(selectedIds) {
+  const services = selectedIds
+    .map(id => state.services.find(service => service.id === String(id)))
+    .filter(Boolean);
+  if (!services.length) return "Todavía no hay servicios seleccionados.";
+  const total = services.reduce((sum, service) => sum + service.price, 0);
+  return `<strong>${services.map(service => escapeHtml(service.name)).join(", ")}</strong>${services.length} servicio${services.length === 1 ? "" : "s"} · ${money(total)}`;
+}
+
+function renderAppointmentServiceOptions(selectedIds = null) {
+  if (selectedIds !== null) appointmentSelectedServiceIds = selectedIds.map(String);
+  const container = $("#appointmentServiceOptions");
+  if (container) container.innerHTML = serviceSelectionSummary(appointmentSelectedServiceIds);
+}
+
+function checkedServiceIds(containerId) {
+  return containerId === "confirmationServiceOptions"
+    ? [...confirmationSelectedServiceIds]
+    : [...appointmentSelectedServiceIds];
+}
+
+function showLogin(message = "") {
+  authenticatedUser = null;
+  $("#loginScreen").classList.remove("hidden");
+  $("#loginError").textContent = message;
+  $("#loginError").classList.toggle("hidden", !message);
+  $("#loginForm").password.value = "";
+}
+
+function showApplication(user) {
+  authenticatedUser = user;
+  $("#sessionUserName").textContent = user.full_name;
+  $("#loginScreen").classList.add("hidden");
+  $("#loginError").classList.add("hidden");
+}
+
+async function loadApplicationData() {
+  await Promise.all([
+    loadServicesFromApi(),
+    loadBarbersFromApi(),
+    loadReceptionistsFromApi(),
+    loadCustomersFromApi(),
+    loadAppointmentsFromApi(),
+    loadSalesFromApi(),
+    loadCurrentShiftFromApi(),
+    loadShiftHistoryFromApi(),
+    loadSuggestedReceiptFromApi()
+  ]);
+  renderAll();
 }
 
 function updateAppointmentBarberOptions() {
@@ -600,7 +720,7 @@ function updateAppointmentBarberOptions() {
   const barbers = usesCurrentShift
     ? currentShift.barbers
     : catalogBarbers.filter(barber => barber.active);
-  select.innerHTML = barbers
+  select.innerHTML = `<option value="">Por asignar</option>` + barbers
     .map(barber => `<option value="${barber.id}">${escapeHtml(barber.name)}</option>`)
     .join("");
   if ([...select.options].some(option => option.value === selectedBarber)) {
@@ -641,8 +761,8 @@ function renderAppointments() {
     .map(item => `
       <tr>
         <td><strong>${item.customer}</strong>${isBirthdayOn(item.birthDate, item.date) ? ` <span title="Cumpleaños">🎂</span>` : ""}<small>${item.phone || "Sin telefono"}</small></td>
-        <td>${item.serviceName}<br><small>${money(item.price)}</small></td>
-        <td>${item.barber}</td>
+        <td>${escapeHtml(item.serviceName)}${item.price === null ? "" : `<br><small>${money(item.price)}</small>`}</td>
+        <td>${escapeHtml(item.barber)}</td>
         <td class="appointment-date"><strong>${formatAppointmentDate(item.date)}</strong><small>${item.time}</small></td>
         <td>
           <span class="status ${item.status}">${item.status}</span>
@@ -657,7 +777,9 @@ function renderAppointments() {
                 ? `<button class="chip-button" data-action="confirm" data-id="${item.id}">Confirmar</button>`
                 : ""}
               <button class="chip-button" data-action="edit" data-id="${item.id}">Editar</button>
-              <button class="chip-button pay" data-action="charge" data-id="${item.id}">Cobrar</button>
+              ${item.barberId && item.serviceId
+                ? `<button class="chip-button pay" data-action="charge" data-id="${item.id}">Cobrar</button>`
+                : `<small>Confirma los datos para cobrar</small>`}
               <button class="chip-button danger" data-action="cancel" data-id="${item.id}">Cancelar</button>
             </div>
           `}
@@ -723,6 +845,24 @@ function renderBarbers() {
       </div>
     </div>
   `).join("");
+}
+
+function renderReceptionists() {
+  $("#receptionistList").innerHTML = catalogReceptionists.map(receptionist => `
+    <div class="price-item ${receptionist.active ? "" : "inactive"}">
+      <div>
+        <strong>${escapeHtml(receptionist.name)}</strong>
+        <span>${receptionist.active ? "Activa" : "Inactiva"}</span>
+      </div>
+      <div class="catalog-actions">
+        <button class="chip-button" type="button" data-edit-receptionist="${receptionist.id}">Editar</button>
+        <button class="chip-button ${receptionist.active ? "danger" : "pay"}" type="button"
+          data-toggle-receptionist="${receptionist.id}">
+          ${receptionist.active ? "Desactivar" : "Activar"}
+        </button>
+      </div>
+    </div>
+  `).join("") || `<div class="cart-empty">No hay recepcionistas registradas.</div>`;
 }
 
 function renderCustomers() {
@@ -804,7 +944,7 @@ function renderShift() {
   $("#openShiftForm").classList.toggle("hidden", Boolean(currentShift));
   $("#shiftDashboard").classList.toggle("hidden", !currentShift);
   $("#currentShiftLabel").textContent = currentShift
-    ? `${currentShift.shift_type === "MORNING" ? "Matutino" : "Vespertino"} · ${currentShift.business_date} · Folio siguiente: ${currentShift.next_receipt_number}`
+    ? `${currentShift.shift_type === "MORNING" ? "Matutino" : "Vespertino"} · ${currentShift.business_date} · Recepción: ${currentShift.receptionist?.name || "Sin registrar"} · Folio siguiente: ${currentShift.next_receipt_number}`
     : "No hay un turno abierto";
   $("#shiftStatus").textContent = currentShift ? "Abierto" : "Sin turno";
   $("#shiftBarberOptions").innerHTML = catalogBarbers
@@ -956,6 +1096,7 @@ function historicalShiftDetail(shift, summary) {
     <div class="history-detail-grid">
       <section class="history-detail-card">
         <h4>Conciliación</h4>
+        <div class="cut-line"><span>Recepcionista</span><strong>${escapeHtml(shift.receptionist?.name || "Sin registrar")}</strong></div>
         <div class="cut-line"><span>Fondo inicial</span><strong>${money(shift.opening_cash)}</strong></div>
         <div class="cut-line"><span>Efectivo esperado</span><strong>${money(summary.expectedCash)}</strong></div>
         <div class="cut-line"><span>Efectivo contado</span><strong>${money(shift.cash_counted)}</strong></div>
@@ -1015,15 +1156,16 @@ function renderShiftHistory() {
         <td><strong>${formatAppointmentDate(shift.business_date)}</strong><small>${new Date(shift.opened_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}</small></td>
         <td>${shift.shift_type === "MORNING" ? "Matutino" : "Vespertino"}</td>
         <td>${shift.barbers.map(barber => escapeHtml(barber.name)).join(", ")}</td>
+        <td>${escapeHtml(shift.receptionist?.name || "Sin registrar")}</td>
         <td>${folios}</td>
         <td><strong>${money(summary.total)}</strong><small>${summary.sales.length} ventas</small></td>
         <td>${money(summary.expenses)}</td>
         <td class="${differenceClass}"><strong>${money(summary.difference)}</strong></td>
-        <td><div class="row-actions"><button class="chip-button" type="button" data-toggle-shift="${shift.id}">Ver desglose</button><button class="chip-button" type="button" data-print-shift="${shift.id}">Reimprimir</button></div></td>
+        <td><button class="chip-button" type="button" data-toggle-shift="${shift.id}">Ver desglose</button></td>
       </tr>
-      <tr class="shift-history-detail hidden" id="shift-history-${shift.id}"><td colspan="8">${historicalShiftDetail(shift, summary)}</td></tr>
+      <tr class="shift-history-detail hidden" id="shift-history-${shift.id}"><td colspan="9">${historicalShiftDetail(shift, summary)}</td></tr>
     `;
-  }).join("") || `<tr><td colspan="8">Todavía no hay turnos cerrados.</td></tr>`;
+  }).join("") || `<tr><td colspan="9">Todavía no hay turnos cerrados.</td></tr>`;
 }
 
 function updateReconciliation(expectedCash, expectedCard, expectedTransfer) {
@@ -1103,7 +1245,6 @@ function renderSalesReport() {
       </td>
       <td>
         ${sale.status === "COMPLETED" ? `
-          <button class="chip-button" type="button" data-reprint-sale="${sale.id}">Reimprimir</button>
           <button class="chip-button danger" type="button" data-cancel-sale="${sale.id}">Cancelar</button>
         ` : `<span class="status cancelada">cancelada</span>`}
       </td>
@@ -1159,6 +1300,7 @@ function renderAll() {
   renderAppointments();
   renderServices();
   renderBarbers();
+  renderReceptionists();
   renderCustomers();
   renderCart();
   renderShift();
@@ -1174,7 +1316,7 @@ function switchView(view) {
     appointments: "Citas",
     cashier: "Caja",
     services: "Catálogo",
-    barbers: "Barberos",
+    barbers: "Personal",
     customers: "Clientes",
     sales: "Ventas",
     shift: "Corte de turno"
@@ -1273,12 +1415,6 @@ document.addEventListener("click", async event => {
     renderAppointments();
   }
 
-  const reprintSale = event.target.closest("[data-reprint-sale]");
-  if (reprintSale) {
-    const sale = state.sales.find(item => item.id === reprintSale.dataset.reprintSale);
-    if (sale) printBlock(saleTicket(sale));
-  }
-
   const cancelSale = event.target.closest("[data-cancel-sale]");
   if (cancelSale) {
     const sale = state.sales.find(item => item.id === cancelSale.dataset.cancelSale);
@@ -1289,17 +1425,6 @@ document.addEventListener("click", async event => {
     $("#saleCancellationForm").reset();
     $("#saleCancellationModal").classList.remove("hidden");
     $("#saleCancellationForm").reason.focus();
-  }
-
-  const reprintShift = event.target.closest("[data-print-shift]");
-  if (reprintShift) {
-    const shift = shiftHistory.find(item => String(item.id) === reprintShift.dataset.printShift);
-    if (shift) {
-      const activeShift = currentShift;
-      currentShift = shift;
-      printBlock(shiftTicket());
-      currentShift = activeShift;
-    }
   }
 
   const toggleShift = event.target.closest("[data-toggle-shift]");
@@ -1406,6 +1531,41 @@ document.addEventListener("click", async event => {
     }
   }
 
+  const editReceptionist = event.target.closest("[data-edit-receptionist]");
+  if (editReceptionist) {
+    const receptionist = catalogReceptionists.find(item => item.id === editReceptionist.dataset.editReceptionist);
+    if (receptionist) {
+      const form = $("#receptionistForm");
+      form.receptionistId.value = receptionist.id;
+      form.name.value = receptionist.name;
+      $("#receptionistFormTitle").textContent = "Editar recepcionista";
+      $("#receptionistSubmitLabel").textContent = "Guardar cambios";
+      $("#cancelReceptionistEdit").classList.remove("hidden");
+      form.name.focus();
+    }
+  }
+
+  const toggleReceptionist = event.target.closest("[data-toggle-receptionist]");
+  if (toggleReceptionist) {
+    const receptionist = catalogReceptionists.find(item => item.id === toggleReceptionist.dataset.toggleReceptionist);
+    if (!receptionist) return;
+    if (receptionist.active && !window.confirm(`¿Desactivar a "${receptionist.name}"?`)) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/receptionists/${receptionist.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: !receptionist.active })
+      });
+      if (!response.ok) throw new Error("No fue posible cambiar el estado");
+      await loadReceptionistsFromApi();
+      renderAll();
+      showToast(receptionist.active ? "Recepcionista desactivada" : "Recepcionista activada");
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudo actualizar la recepcionista");
+    }
+  }
+
   const editCustomer = event.target.closest("[data-edit-customer]");
   if (editCustomer) {
     const customer = catalogCustomers.find(item => item.id === editCustomer.dataset.editCustomer);
@@ -1458,22 +1618,27 @@ document.addEventListener("click", async event => {
         form.date.value = appointment.date;
         form.time.value = appointment.time;
         updateAppointmentBarberOptions();
-        form.barber.value = appointment.barberId;
-        form.serviceId.value = appointment.serviceId;
+        form.barber.value = appointment.barberId || "";
+        renderAppointmentServiceOptions(appointment.serviceIds || []);
         form.phone.disabled = true;
         form.customer.readOnly = true;
         form.birthDate.disabled = true;
-        form.barber.disabled = true;
+        form.barber.disabled = false;
         $("#appointmentFormTitle").textContent = "Editar cita";
         $("#appointmentSubmitLabel").textContent = "Guardar cambios";
         $("#cancelAppointmentEdit").classList.remove("hidden");
         form.time.focus();
       }
       if (action.dataset.action === "confirm") {
-        await updateAppointmentStatus(appointment.id, "CONFIRMED");
-        await loadAppointmentsFromApi();
-        renderAll();
-        showToast("Cita confirmada");
+        if (appointment.barberId && appointment.serviceIds.length) {
+          await updateAppointmentStatus(appointment.id, "CONFIRMED", null, appointment.barberId, appointment.serviceIds);
+          await loadAppointmentsFromApi();
+          renderAll();
+          showToast("Cita confirmada");
+        } else {
+          openAppointmentConfirmationModal(appointment);
+          return;
+        }
       }
       if (action.dataset.action === "cancel") {
         pendingCancellationAppointmentId = appointment.id;
@@ -1485,7 +1650,10 @@ document.addEventListener("click", async event => {
         return;
       }
       if (action.dataset.action === "charge") {
-        cart = [{ id: appointment.serviceId, name: appointment.serviceName, price: appointment.price }];
+        cart = appointment.serviceIds.map(serviceId => {
+          const service = state.services.find(item => item.id === serviceId);
+          return service ? { id: service.id, name: service.name, price: service.price } : null;
+        }).filter(Boolean);
         $("#saleForm").customer.value = appointment.customer;
         $("#saleForm").phone.value = appointment.phone || "";
         $("#saleForm").birthDate.value = formatBirthDate(appointment.birthDate);
@@ -1522,7 +1690,122 @@ $("#paymentMethod").addEventListener("change", updatePaymentFields);
 $("#cancelServiceEdit").addEventListener("click", resetServiceForm);
 $("#cancelAppointmentEdit").addEventListener("click", resetAppointmentForm);
 $("#cancelBarberEdit").addEventListener("click", resetBarberForm);
+$("#cancelReceptionistEdit").addEventListener("click", resetReceptionistForm);
 $("#cancelCustomerEdit").addEventListener("click", resetCustomerForm);
+
+function closeAppointmentConfirmationModal() {
+  pendingConfirmationAppointmentId = null;
+  $("#appointmentConfirmationForm").reset();
+  $("#appointmentConfirmationModal").classList.add("hidden");
+}
+
+function openAppointmentConfirmationModal(appointment) {
+  pendingConfirmationAppointmentId = appointment.id;
+  const usesCurrentShift = currentShift
+    && appointment.date === currentShift.business_date;
+  const barbers = usesCurrentShift
+    ? currentShift.barbers
+    : catalogBarbers.filter(barber => barber.active);
+  const form = $("#appointmentConfirmationForm");
+  const select = form.barber;
+  select.innerHTML = `<option value="">Selecciona un barbero</option>` + barbers
+    .map(barber => `<option value="${barber.id}">${escapeHtml(barber.name)}</option>`)
+    .join("");
+  confirmationSelectedServiceIds = [...(appointment.serviceIds || [])];
+  $("#confirmationServiceOptions").innerHTML = serviceSelectionSummary(confirmationSelectedServiceIds);
+  select.value = appointment.barberId || "";
+  $("#appointmentConfirmationLabel").textContent =
+    `${appointment.customer} · ${appointment.serviceName} · ${formatAppointmentDate(appointment.date)} ${appointment.time}`;
+  $("#appointmentConfirmationModal").classList.remove("hidden");
+  select.focus();
+}
+
+$("#closeAppointmentConfirmationModal").addEventListener("click", closeAppointmentConfirmationModal);
+$("#cancelAppointmentConfirmationModal").addEventListener("click", closeAppointmentConfirmationModal);
+
+function renderServicePicker() {
+  $("#servicePickerGrid").innerHTML = state.services.map(service => `
+    <button class="service-picker-card ${servicePickerDraftIds.has(service.id) ? "selected" : ""}"
+      type="button" data-picker-service="${service.id}">
+      <strong>${escapeHtml(service.name)}</strong>
+      <span>${escapeHtml(service.type)}</span>
+      <b>${money(service.price)}</b>
+    </button>
+  `).join("");
+  const selected = state.services.filter(service => servicePickerDraftIds.has(service.id));
+  $("#servicePickerCount").textContent = `${selected.length} servicio${selected.length === 1 ? "" : "s"}`;
+  $("#servicePickerTotal").textContent = money(selected.reduce((sum, service) => sum + service.price, 0));
+}
+
+function openServicePicker(target) {
+  servicePickerTarget = target;
+  const selected = target === "confirmation"
+    ? confirmationSelectedServiceIds
+    : appointmentSelectedServiceIds;
+  servicePickerDraftIds = new Set(selected.map(String));
+  renderServicePicker();
+  $("#servicePickerModal").classList.remove("hidden");
+}
+
+function closeServicePicker() {
+  servicePickerTarget = null;
+  $("#servicePickerModal").classList.add("hidden");
+}
+
+$("#openAppointmentServicePicker").addEventListener("click", () => openServicePicker("appointment"));
+$("#openConfirmationServicePicker").addEventListener("click", () => openServicePicker("confirmation"));
+$("#closeServicePickerModal").addEventListener("click", closeServicePicker);
+$("#cancelServicePickerModal").addEventListener("click", closeServicePicker);
+$("#servicePickerGrid").addEventListener("click", event => {
+  const card = event.target.closest("[data-picker-service]");
+  if (!card) return;
+  const serviceId = card.dataset.pickerService;
+  if (servicePickerDraftIds.has(serviceId)) servicePickerDraftIds.delete(serviceId);
+  else servicePickerDraftIds.add(serviceId);
+  renderServicePicker();
+});
+$("#applyServicePicker").addEventListener("click", () => {
+  const selected = [...servicePickerDraftIds];
+  if (servicePickerTarget === "confirmation") {
+    confirmationSelectedServiceIds = selected;
+    $("#confirmationServiceOptions").innerHTML = serviceSelectionSummary(selected);
+  } else {
+    renderAppointmentServiceOptions(selected);
+  }
+  closeServicePicker();
+});
+
+$("#appointmentConfirmationForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!pendingConfirmationAppointmentId) return;
+  const form = event.currentTarget;
+  const serviceIds = checkedServiceIds("confirmationServiceOptions");
+  if (!serviceIds.length) {
+    showToast("Selecciona al menos un servicio");
+    return;
+  }
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    await updateAppointmentStatus(
+      pendingConfirmationAppointmentId,
+      "CONFIRMED",
+      null,
+      form.barber.value,
+      serviceIds
+    );
+    await loadAppointmentsFromApi();
+    closeAppointmentConfirmationModal();
+    renderAll();
+    showToast("Cita confirmada con barbero y servicio");
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "No fue posible confirmar la cita");
+  } finally {
+    button.disabled = false;
+  }
+});
+
 function closeCancellationModal() {
   pendingCancellationAppointmentId = null;
   $("#cancellationForm").reset();
@@ -1638,6 +1921,8 @@ $("#openShiftForm").addEventListener("submit", async event => {
       body: JSON.stringify({
         shift_type: form.shiftType.value,
         opening_cash: Number(form.openingCash.value || 0),
+        starting_receipt_number: Number(form.startingReceiptNumber.value || 0),
+        receptionist_id: Number(form.receptionistId.value),
         barber_ids: barberIds
       })
     });
@@ -1719,12 +2004,10 @@ $("#confirmCloseShift").addEventListener("click", async event => {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.detail || "No fue posible cerrar el turno");
-    currentShift = result;
     $("#closeShiftModal").classList.add("hidden");
-    printBlock(shiftTicket());
     currentShift = null;
     pendingCloseShiftData = null;
-    await loadShiftHistoryFromApi();
+    await Promise.all([loadShiftHistoryFromApi(), loadSuggestedReceiptFromApi()]);
     $("#closeShiftForm").reset();
     renderAll();
     showToast("Turno cerrado correctamente");
@@ -1740,6 +2023,7 @@ $("#appointmentForm").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.currentTarget;
   const appointmentId = form.appointmentId.value;
+  const serviceIds = checkedServiceIds("appointmentServiceOptions");
   const submitButton = form.querySelector('button[type="submit"]');
   const duplicate = appointmentConflicts(form, appointmentId || null);
   if (duplicate) {
@@ -1759,14 +2043,15 @@ $("#appointmentForm").addEventListener("submit", async event => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(appointmentId
         ? {
-            service_id: Number(form.serviceId.value),
+            barber_id: form.barber.value ? Number(form.barber.value) : null,
+            service_ids: serviceIds.map(Number),
             appointment_date: form.date.value,
             appointment_time: form.time.value
           }
         : {
             customer_id: Number(customer.id),
-            barber_id: Number(form.barber.value),
-            service_id: Number(form.serviceId.value),
+            barber_id: form.barber.value ? Number(form.barber.value) : null,
+            service_ids: serviceIds.map(Number),
             appointment_date: form.date.value,
             appointment_time: form.time.value
           })
@@ -1852,6 +2137,36 @@ $("#barberForm").addEventListener("submit", async event => {
   } catch (error) {
     console.error(error);
     showToast("No se pudo guardar el barbero");
+  }
+});
+
+$("#receptionistForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const receptionistId = form.receptionistId.value;
+  const currentReceptionist = catalogReceptionists.find(item => item.id === receptionistId);
+  try {
+    const response = await fetch(
+      receptionistId
+        ? `${API_BASE_URL}/receptionists/${receptionistId}`
+        : `${API_BASE_URL}/receptionists`,
+      {
+        method: receptionistId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name.value.trim(),
+          active: currentReceptionist?.active ?? true
+        })
+      }
+    );
+    if (!response.ok) throw new Error("No fue posible guardar la recepcionista");
+    resetReceptionistForm();
+    await loadReceptionistsFromApi();
+    renderAll();
+    showToast(receptionistId ? "Recepcionista actualizada" : "Recepcionista agregada");
+  } catch (error) {
+    console.error(error);
+    showToast("No se pudo guardar la recepcionista");
   }
 });
 
@@ -1949,12 +2264,42 @@ $("#saleForm").addEventListener("submit", async event => {
       loadCurrentShiftFromApi()
     ]);
     renderAll();
-    printBlock(saleTicket(sale));
     showToast(customer ? "Venta y cliente guardados" : "Venta registrada");
   } catch (error) {
     console.error(error);
     showToast(error.message || "No se pudo registrar la venta");
   }
+});
+
+$("#loginForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  $("#loginError").classList.add("hidden");
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: form.username.value.trim(), password: form.password.value })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "No fue posible iniciar sesión");
+    showApplication(result);
+    form.reset();
+    await loadApplicationData();
+  } catch (error) {
+    showLogin(error.message || "No fue posible iniciar sesión");
+    $("#loginForm").username.focus();
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$("#logoutButton").addEventListener("click", async () => {
+  await fetch(`${API_BASE_URL}/auth/logout`, { method: "POST" }).catch(() => null);
+  showLogin();
+  $("#loginForm").username.focus();
 });
 
 async function initialize() {
@@ -1965,19 +2310,13 @@ async function initialize() {
   renderAll();
 
   try {
-    await Promise.all([
-      loadServicesFromApi(),
-      loadBarbersFromApi(),
-      loadCustomersFromApi(),
-      loadAppointmentsFromApi(),
-      loadSalesFromApi(),
-      loadCurrentShiftFromApi(),
-      loadShiftHistoryFromApi()
-    ]);
-    renderAll();
+    const authResponse = await fetch(`${API_BASE_URL}/auth/me`);
+    if (!authResponse.ok) return showLogin();
+    showApplication(await authResponse.json());
+    await loadApplicationData();
   } catch (error) {
     console.error(error);
-    showToast("Catálogo sin conexión; se muestran datos guardados");
+    showLogin("No fue posible conectar con el servidor");
   }
 }
 

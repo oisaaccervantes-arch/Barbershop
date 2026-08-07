@@ -95,7 +95,27 @@ def get_appointment_or_404(appointment_id: int, db: Session) -> Appointment:
     return appointment
 
 
-def serialize_appointment(appointment: Appointment) -> dict:
+def appointment_service_ids(appointment: Appointment) -> list[int]:
+    return list(appointment.service_ids or ([appointment.service_id] if appointment.service_id else []))
+
+
+def get_active_services(db: Session, service_ids: list[int]) -> list[Service]:
+    unique_ids = list(dict.fromkeys(service_ids))
+    if not unique_ids:
+        return []
+    services = db.scalars(select(Service).where(Service.id.in_(unique_ids))).all()
+    by_id = {service.id: service for service in services}
+    ordered = [by_id[service_id] for service_id in unique_ids if service_id in by_id]
+    if len(ordered) != len(unique_ids) or any(not service.active for service in ordered):
+        raise HTTPException(status_code=400, detail="Uno de los servicios no está activo")
+    return ordered
+
+
+def serialize_appointment(appointment: Appointment, db: Session) -> dict:
+    service_ids = appointment_service_ids(appointment)
+    services = db.scalars(select(Service).where(Service.id.in_(service_ids))).all() if service_ids else []
+    by_id = {service.id: service for service in services}
+    ordered_services = [by_id[service_id] for service_id in service_ids if service_id in by_id]
     return {
         "id": appointment.id,
         "customer_id": appointment.customer_id,
@@ -103,9 +123,11 @@ def serialize_appointment(appointment: Appointment) -> dict:
         "customer_phone": appointment.customer.phone,
         "customer_birth_date": appointment.customer.birth_date,
         "barber_id": appointment.barber_id,
-        "barber_name": appointment.barber.name,
+        "barber_name": appointment.barber.name if appointment.barber else None,
         "service_id": appointment.service_id,
-        "service_name": appointment.service.name,
+        "service_name": appointment.service.name if appointment.service else None,
+        "service_ids": service_ids,
+        "service_names": [service.name for service in ordered_services],
         "appointment_date": appointment.appointment_date,
         "appointment_time": appointment.appointment_time,
         "price": appointment.price,
@@ -136,25 +158,28 @@ def list_appointments(
         Appointment.appointment_time,
         Appointment.id,
     )
-    return [serialize_appointment(item) for item in db.scalars(statement).all()]
+    return [serialize_appointment(item, db) for item in db.scalars(statement).all()]
 
 
 @router.post("", response_model=AppointmentRead, status_code=status.HTTP_201_CREATED)
 def create_appointment(payload: AppointmentCreate, db: DatabaseSession):
     customer = db.get(Customer, payload.customer_id)
-    barber = db.get(Barber, payload.barber_id)
-    service = db.get(Service, payload.service_id)
+    barber = db.get(Barber, payload.barber_id) if payload.barber_id else None
+    selected_service_ids = payload.service_ids or ([payload.service_id] if payload.service_id else [])
+    services = get_active_services(db, selected_service_ids)
+    service = services[0] if services else None
     if customer is None or not customer.active:
         raise HTTPException(status_code=400, detail="El cliente no está activo")
-    if barber is None or not barber.active:
+    if payload.barber_id and (barber is None or not barber.active):
         raise HTTPException(status_code=400, detail="El barbero no está activo")
-    if service is None or not service.active:
+    if payload.service_id and (service is None or not service.active):
         raise HTTPException(status_code=400, detail="El servicio no está activo")
-    ensure_barber_is_available_for_open_shift(
-        db, barber.id, payload.appointment_date
-    )
+    if barber:
+        ensure_barber_is_available_for_open_shift(
+            db, barber.id, payload.appointment_date
+        )
 
-    if has_schedule_conflict(
+    if barber and has_schedule_conflict(
         db, barber.id, payload.appointment_date, payload.appointment_time
     ):
         raise HTTPException(
@@ -164,16 +189,17 @@ def create_appointment(payload: AppointmentCreate, db: DatabaseSession):
 
     appointment = Appointment(
         customer_id=customer.id,
-        barber_id=barber.id,
-        service_id=service.id,
+        barber_id=barber.id if barber else None,
+        service_id=service.id if service else None,
+        service_ids=[item.id for item in services] or None,
         appointment_date=payload.appointment_date,
         appointment_time=payload.appointment_time,
-        price=service.price,
+        price=sum((item.price for item in services), start=0) if services else None,
         status=AppointmentStatus.pending.value,
     )
     db.add(appointment)
     db.commit()
-    return serialize_appointment(get_appointment_or_404(appointment.id, db))
+    return serialize_appointment(get_appointment_or_404(appointment.id, db), db)
 
 
 @router.put("/{appointment_id}", response_model=AppointmentRead)
@@ -188,15 +214,25 @@ def update_appointment(
         AppointmentStatus.confirmed.value,
     }:
         raise HTTPException(status_code=409, detail="Solo se pueden editar citas activas")
-    service = db.get(Service, payload.service_id)
-    if service is None or not service.active:
+    selected_service_ids = payload.service_ids or ([payload.service_id] if payload.service_id else [])
+    services = get_active_services(db, selected_service_ids)
+    service = services[0] if services else None
+    if payload.service_id and (service is None or not service.active):
         raise HTTPException(status_code=400, detail="El servicio no está activo")
-    ensure_barber_is_available_for_open_shift(
-        db, appointment.barber_id, payload.appointment_date
-    )
-    if has_schedule_conflict(
+    barber = db.get(Barber, payload.barber_id) if payload.barber_id else None
+    if payload.barber_id and (barber is None or not barber.active):
+        raise HTTPException(status_code=400, detail="El barbero no está activo")
+    if appointment.status == AppointmentStatus.confirmed.value and not barber:
+        raise HTTPException(status_code=400, detail="Una cita confirmada debe tener barbero")
+    if appointment.status == AppointmentStatus.confirmed.value and not service:
+        raise HTTPException(status_code=400, detail="Una cita confirmada debe tener servicio")
+    if barber:
+        ensure_barber_is_available_for_open_shift(
+            db, barber.id, payload.appointment_date
+        )
+    if barber and has_schedule_conflict(
         db,
-        appointment.barber_id,
+        barber.id,
         payload.appointment_date,
         payload.appointment_time,
         exclude_appointment_id=appointment.id,
@@ -205,12 +241,14 @@ def update_appointment(
             status_code=409,
             detail="El barbero ya tiene una cita dentro de ese lapso de 15 minutos",
         )
-    appointment.service_id = service.id
+    appointment.service_id = service.id if service else None
+    appointment.service_ids = [item.id for item in services] or None
+    appointment.barber_id = barber.id if barber else None
     appointment.appointment_date = payload.appointment_date
     appointment.appointment_time = payload.appointment_time
-    appointment.price = service.price
+    appointment.price = sum((item.price for item in services), start=0) if services else None
     db.commit()
-    return serialize_appointment(get_appointment_or_404(appointment.id, db))
+    return serialize_appointment(get_appointment_or_404(appointment.id, db), db)
 
 
 @router.patch("/{appointment_id}/status", response_model=AppointmentRead)
@@ -229,6 +267,39 @@ def update_appointment_status(
             status_code=status.HTTP_409_CONFLICT,
             detail="La cita ya tiene un estado final",
         )
+    if payload.status == AppointmentStatus.confirmed:
+        barber_id = payload.barber_id or appointment.barber_id
+        barber = db.get(Barber, barber_id) if barber_id else None
+        if barber is None or not barber.active:
+            raise HTTPException(
+                status_code=400,
+                detail="Selecciona un barbero activo para confirmar la cita",
+            )
+        ensure_barber_is_available_for_open_shift(
+            db, barber.id, appointment.appointment_date
+        )
+        if has_schedule_conflict(
+            db,
+            barber.id,
+            appointment.appointment_date,
+            appointment.appointment_time,
+            exclude_appointment_id=appointment.id,
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="El barbero ya tiene una cita dentro de ese lapso de 15 minutos",
+            )
+        appointment.barber_id = barber.id
+        selected_service_ids = payload.service_ids or appointment_service_ids(appointment)
+        services = get_active_services(db, selected_service_ids)
+        if not services:
+            raise HTTPException(
+                status_code=400,
+                detail="Selecciona un servicio activo para confirmar la cita",
+            )
+        appointment.service_id = services[0].id
+        appointment.service_ids = [service.id for service in services]
+        appointment.price = sum((service.price for service in services), start=0)
     if payload.status == AppointmentStatus.cancelled:
         cancellation_note = " ".join((payload.cancellation_note or "").split())
         if not cancellation_note:
@@ -241,4 +312,4 @@ def update_appointment_status(
     appointment.status = payload.status.value
     db.commit()
     db.refresh(appointment)
-    return serialize_appointment(appointment)
+    return serialize_appointment(appointment, db)

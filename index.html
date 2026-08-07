@@ -11,6 +11,38 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <div class="login-screen" id="loginScreen">
+    <div class="login-sidebar">
+      <div class="brand">
+        <div class="brand-mark"><span class="material-symbols-outlined">content_cut</span></div>
+        <div><h1>Bizantino</h1><p>Barbería</p></div>
+      </div>
+      <div class="login-sidebar-copy">
+        <p class="eyebrow">Sistema de ventas</p>
+        <h2>Version 1.0</h2>
+      </div>
+    </div>
+    <div class="login-content">
+      <form class="login-card" id="loginForm">
+        <div>
+          <p class="eyebrow">Acceso al sistema</p>
+          <h2>Iniciar sesión</h2>
+          <p class="login-help">Ingresa con la cuenta asignada a la barbería.</p>
+        </div>
+        <label>Usuario
+          <input name="username" autocomplete="username" maxlength="80" required autofocus>
+        </label>
+        <label>Contraseña
+          <input name="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" required>
+        </label>
+        <p class="login-error hidden" id="loginError"></p>
+        <button class="submit-button" type="submit">
+          <span class="material-symbols-outlined">login</span>
+          Entrar
+        </button>
+      </form>
+    </div>
+  </div>
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark">
@@ -37,7 +69,7 @@
       </button>
       <button class="nav-item" data-view="barbers">
         <span class="material-symbols-outlined"></span>
-        Barberos
+        Personal
       </button>
       <button class="nav-item" data-view="customers">
         <span class="material-symbols-outlined"></span>
@@ -66,6 +98,10 @@
         <h2 id="viewTitle">Citas</h2>
       </div>
       <div class="topbar-actions">
+        <div class="session-user">
+          <span id="sessionUserName"></span>
+          <button class="chip-button" id="logoutButton" type="button">Salir</button>
+        </div>
         <div class="metric">
           <span>Ventas hoy</span>
           <strong id="todaySales">$0</strong>
@@ -112,11 +148,15 @@
             </label>
           </div>
           <label>Barbero
-            <select name="barber" required></select>
+            <select name="barber"></select>
+            <small>Opcional al agendar. Se solicitará al confirmar si queda pendiente.</small>
           </label>
-          <label>Servicio
-            <select name="serviceId" required></select>
-          </label>
+          <fieldset class="service-picker">
+            <legend>Servicios</legend>
+            <div class="selected-services-summary" id="appointmentServiceOptions"></div>
+            <button class="secondary-button" id="openAppointmentServicePicker" type="button">Seleccionar servicios</button>
+            <small>Opcional al agendar. Se solicitará al confirmar si queda pendiente.</small>
+          </fieldset>
           <button class="submit-button" type="submit">
             <span class="material-symbols-outlined">save</span>
             <span id="appointmentSubmitLabel">Guardar cita</span>
@@ -252,8 +292,8 @@
             </div>
           </div>
           <button class="submit-button" type="submit">
-            <span class="material-symbols-outlined">print</span>
-            Cobrar e imprimir
+            <span class="material-symbols-outlined">payments</span>
+            Cobrar
           </button>
         </form>
       </div>
@@ -332,6 +372,36 @@
             </div>
           </div>
           <div class="price-list" id="barberList"></div>
+        </div>
+      </div>
+      <div class="workspace two-columns">
+        <form class="panel form-panel" id="receptionistForm">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Recepción</p>
+              <h3 id="receptionistFormTitle">Agregar recepcionista</h3>
+            </div>
+          </div>
+          <input name="receptionistId" type="hidden">
+          <label>Nombre
+            <input name="name" placeholder="Nombre de la recepcionista" required>
+          </label>
+          <button class="submit-button" type="submit">
+            <span class="material-symbols-outlined">add</span>
+            <span id="receptionistSubmitLabel">Agregar</span>
+          </button>
+          <button class="secondary-button hidden" id="cancelReceptionistEdit" type="button">
+            Cancelar edición
+          </button>
+        </form>
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Recepción</p>
+              <h3>Recepcionistas registradas</h3>
+            </div>
+          </div>
+          <div class="price-list" id="receptionistList"></div>
         </div>
       </div>
     </section>
@@ -485,7 +555,20 @@
             <label>Fondo inicial
               <input name="openingCash" type="number" min="0" step="0.01" value="0" required>
             </label>
+            <label>Folio inicial
+              <span class="receipt-suggestion-row">
+                <input name="startingReceiptNumber" type="number" min="0" max="10000" step="1" value="0" required>
+                <span class="receipt-suggestion">
+                  <small>Folio sugerido</small>
+                  <strong id="suggestedReceiptValue">Consultando…</strong>
+                </span>
+              </span>
+              <small id="startingReceiptHelp">El sistema consultará el siguiente folio disponible</small>
+            </label>
           </div>
+          <label>Recepcionista responsable
+            <select name="receptionistId" id="shiftReceptionistSelect" required></select>
+          </label>
           <fieldset>
             <legend>Barberos que trabajarán</legend>
             <div class="barber-checklist" id="shiftBarberOptions"></div>
@@ -545,7 +628,7 @@
               <div class="reconciliation-result" id="reconciliationResult"></div>
               <button class="submit-button" form="closeShiftForm" type="submit">
                 <span class="material-symbols-outlined">lock</span>
-                Cerrar e imprimir corte
+                Cerrar turno
               </button>
             </section>
           </div>
@@ -588,6 +671,7 @@
                   <th>Fecha</th>
                   <th>Turno</th>
                   <th>Barberos</th>
+                  <th>Recepcionista</th>
                   <th>Folios</th>
                   <th>Venta</th>
                   <th>Gastos</th>
@@ -619,10 +703,58 @@
       <div class="modal-actions">
         <button class="secondary-button" id="cancelCloseShift" type="button">Volver</button>
         <button class="submit-button danger-button" id="confirmCloseShift" type="button">
-          Cerrar e imprimir
+          Cerrar turno
         </button>
       </div>
     </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="servicePickerModal">
+    <div class="modal-card service-picker-modal">
+      <div class="panel-header">
+        <div><p class="eyebrow">Servicios</p><h3>Seleccionar servicios</h3></div>
+        <button class="icon-button" id="closeServicePickerModal" type="button" title="Cerrar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <p>Toca uno o varios servicios para agregarlos a la cita.</p>
+      <div class="service-picker-grid" id="servicePickerGrid"></div>
+      <div class="service-picker-total">
+        <span id="servicePickerCount">0 servicios</span>
+        <strong id="servicePickerTotal">$0</strong>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-button" id="cancelServicePickerModal" type="button">Volver</button>
+        <button class="submit-button" id="applyServicePicker" type="button">Aplicar selección</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="appointmentConfirmationModal">
+    <form class="modal-card" id="appointmentConfirmationForm">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Citas</p>
+          <h3>Confirmar cita</h3>
+        </div>
+        <button class="icon-button" id="closeAppointmentConfirmationModal" type="button" title="Cerrar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <p id="appointmentConfirmationLabel"></p>
+      <label>Barbero que atenderá
+        <select name="barber" required></select>
+      </label>
+      <fieldset class="service-picker">
+        <legend>Servicios que recibirá</legend>
+        <div class="selected-services-summary" id="confirmationServiceOptions"></div>
+        <button class="secondary-button" id="openConfirmationServicePicker" type="button">Seleccionar servicios</button>
+      </fieldset>
+      <div class="modal-actions">
+        <button class="secondary-button" id="cancelAppointmentConfirmationModal" type="button">Volver</button>
+        <button class="submit-button" type="submit">Confirmar cita</button>
+      </div>
+    </form>
   </div>
 
   <div class="modal-backdrop hidden" id="cancellationModal">

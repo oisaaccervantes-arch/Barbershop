@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models.barber import Barber
 from app.models.cash_shift import CashShift, ShiftBarber, ShiftExpense
 from app.models.sale import Sale
+from app.models.receptionist import Receptionist
 from app.schemas.cash_shift import CashShiftClose, CashShiftCreate, CashShiftRead, ShiftExpenseCreate, ShiftExpenseRead
 
 
@@ -19,19 +20,37 @@ LOCAL_ZONE = ZoneInfo("America/Hermosillo")
 MAX_RECEIPT_NUMBER = 10_000
 
 
-def next_receipt_number(db: Session) -> int:
+def next_global_receipt_number(db: Session) -> int | None:
     last_number = db.scalar(
         select(Sale.receipt_number)
         .where(Sale.receipt_number.is_not(None))
         .order_by(Sale.sold_at.desc(), Sale.id.desc())
         .limit(1)
     )
-    return 0 if last_number is None or last_number >= MAX_RECEIPT_NUMBER else last_number + 1
+    if last_number is None:
+        return None
+    return 0 if last_number >= MAX_RECEIPT_NUMBER else last_number + 1
+
+
+def next_receipt_number(db: Session, shift: CashShift) -> int:
+    last_number = db.scalar(
+        select(Sale.receipt_number)
+        .where(
+            Sale.shift_id == shift.id,
+            Sale.receipt_number.is_not(None),
+        )
+        .order_by(Sale.sold_at.desc(), Sale.id.desc())
+        .limit(1)
+    )
+    if last_number is None:
+        return shift.starting_receipt_number
+    return 0 if last_number >= MAX_RECEIPT_NUMBER else last_number + 1
 
 
 def shift_query():
     return select(CashShift).options(
         joinedload(CashShift.barbers).joinedload(ShiftBarber.barber),
+        joinedload(CashShift.receptionist),
         selectinload(CashShift.expenses),
     )
 
@@ -43,13 +62,18 @@ def serialize_shift(shift: CashShift, db: Session) -> dict:
         "shift_type": shift.shift_type,
         "status": shift.status,
         "opening_cash": shift.opening_cash,
+        "starting_receipt_number": shift.starting_receipt_number,
+        "receptionist": (
+            {"id": shift.receptionist.id, "name": shift.receptionist.name}
+            if shift.receptionist else None
+        ),
         "opened_at": shift.opened_at,
         "closed_at": shift.closed_at,
         "cash_counted": shift.cash_counted,
         "card_reported": shift.card_reported,
         "transfer_reported": shift.transfer_reported,
         "closing_notes": shift.closing_notes,
-        "next_receipt_number": next_receipt_number(db),
+        "next_receipt_number": next_receipt_number(db, shift),
         "barbers": [{"id": row.barber.id, "name": row.barber.name} for row in shift.barbers],
         "expenses": [
             {"id": expense.id, "concept": expense.concept, "amount": expense.amount, "created_at": expense.created_at}
@@ -64,6 +88,15 @@ def get_current_shift(db: DatabaseSession):
     return serialize_shift(shift, db) if shift else None
 
 
+@router.get("/next-receipt")
+def get_next_receipt(db: DatabaseSession):
+    next_number = next_global_receipt_number(db)
+    return {
+        "next_receipt_number": 0 if next_number is None else next_number,
+        "can_choose": next_number is None,
+    }
+
+
 @router.get("", response_model=list[CashShiftRead])
 def list_shifts(db: DatabaseSession):
     shifts = db.scalars(shift_query().order_by(CashShift.opened_at.desc(), CashShift.id.desc()))
@@ -74,14 +107,25 @@ def list_shifts(db: DatabaseSession):
 def open_shift(payload: CashShiftCreate, db: DatabaseSession):
     if db.scalar(select(CashShift.id).where(CashShift.status == "OPEN").limit(1)):
         raise HTTPException(status_code=409, detail="Ya existe un turno abierto")
+    expected_receipt = next_global_receipt_number(db)
+    if expected_receipt is not None and payload.starting_receipt_number != expected_receipt:
+        raise HTTPException(
+            status_code=409,
+            detail=f"El siguiente folio disponible es {expected_receipt}",
+        )
     barber_ids = list(dict.fromkeys(payload.barber_ids))
     barbers = db.scalars(select(Barber).where(Barber.id.in_(barber_ids), Barber.active.is_(True))).all()
     if len(barbers) != len(barber_ids):
         raise HTTPException(status_code=400, detail="Uno de los barberos no existe o está inactivo")
+    receptionist = db.get(Receptionist, payload.receptionist_id)
+    if receptionist is None or not receptionist.active:
+        raise HTTPException(status_code=400, detail="La recepcionista no existe o está inactiva")
     shift = CashShift(
         business_date=datetime.now(LOCAL_ZONE).date(),
         shift_type=payload.shift_type.value,
         opening_cash=payload.opening_cash,
+        starting_receipt_number=payload.starting_receipt_number,
+        receptionist_id=receptionist.id,
         barbers=[ShiftBarber(barber_id=barber.id) for barber in barbers],
     )
     db.add(shift)

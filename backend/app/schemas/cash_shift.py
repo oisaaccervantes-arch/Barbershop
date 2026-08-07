@@ -13,10 +13,17 @@ class ShiftType(str, Enum):
 class CashShiftCreate(BaseModel):
     shift_type: ShiftType
     opening_cash: Decimal = Field(default=Decimal("0"), ge=0, max_digits=10, decimal_places=2)
+    starting_receipt_number: int = Field(default=0, ge=0, le=10_000)
+    receptionist_id: int
     barber_ids: list[int] = Field(min_length=1)
 
 
 class ShiftBarberRead(BaseModel):
+    id: int
+    name: str
+
+
+class ShiftReceptionistRead(BaseModel):
     id: int
     name: str
 
@@ -48,6 +55,8 @@ class CashShiftRead(BaseModel):
     shift_type: ShiftType
     status: str
     opening_cash: Decimal
+    starting_receipt_number: int
+    receptionist: ShiftReceptionistRead | None
     opened_at: datetime
     closed_at: datetime | None
     cash_counted: Decimal | None

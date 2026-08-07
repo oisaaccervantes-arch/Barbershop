@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint, func
+from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -13,6 +13,10 @@ class CashShift(Base):
         CheckConstraint("shift_type IN ('MORNING', 'EVENING')", name="ck_cash_shifts_type_valid"),
         CheckConstraint("status IN ('OPEN', 'CLOSED')", name="ck_cash_shifts_status_valid"),
         CheckConstraint("opening_cash >= 0", name="ck_cash_shifts_opening_cash_nonnegative"),
+        CheckConstraint(
+            "starting_receipt_number >= 0 AND starting_receipt_number <= 10000",
+            name="ck_cash_shifts_starting_receipt_range",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -20,6 +24,8 @@ class CashShift(Base):
     shift_type: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="OPEN", server_default="OPEN")
     opening_cash: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0, server_default="0")
+    starting_receipt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    receptionist_id: Mapped[int | None] = mapped_column(ForeignKey("receptionists.id", ondelete="RESTRICT"))
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cash_counted: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
@@ -30,6 +36,7 @@ class CashShift(Base):
     barbers = relationship("ShiftBarber", back_populates="shift", cascade="all, delete-orphan")
     sales = relationship("Sale", back_populates="shift")
     expenses = relationship("ShiftExpense", back_populates="shift", cascade="all, delete-orphan")
+    receptionist = relationship("Receptionist")
 
 
 class ShiftBarber(Base):

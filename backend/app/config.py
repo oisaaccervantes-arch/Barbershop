@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     db_name: str = "bizantino_pos_dev"
     db_user: str = "postgres"
     db_password: str
+    auth_secret_key: str = "dev-only-change-before-production"
+    auth_cookie_secure: bool = False
+    auth_session_hours: int = 12
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -32,4 +35,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

@@ -21,6 +21,19 @@ from app.schemas.sale import PaymentMethod, SaleCancel, SaleCreate, SaleRead
 router = APIRouter(prefix="/api/sales", tags=["sales"])
 DatabaseSession = Annotated[Session, Depends(get_db)]
 MONEY_UNIT = Decimal("0.01")
+MAX_RECEIPT_NUMBER = 10_000
+
+
+def expected_shift_receipt_number(db: Session, shift: CashShift) -> int:
+    last_number = db.scalar(
+        select(Sale.receipt_number)
+        .where(Sale.shift_id == shift.id, Sale.receipt_number.is_not(None))
+        .order_by(Sale.sold_at.desc(), Sale.id.desc())
+        .limit(1)
+    )
+    if last_number is None:
+        return shift.starting_receipt_number
+    return 0 if last_number >= MAX_RECEIPT_NUMBER else last_number + 1
 
 
 def serialize_sale(sale: Sale) -> dict:
@@ -118,6 +131,12 @@ def create_sale(payload: SaleCreate, db: DatabaseSession):
     shift = db.get(CashShift, payload.shift_id)
     if shift is None or shift.status != "OPEN":
         raise HTTPException(status_code=400, detail="El turno no está abierto")
+    expected_receipt = expected_shift_receipt_number(db, shift)
+    if payload.receipt_number != expected_receipt:
+        raise HTTPException(
+            status_code=409,
+            detail=f"El folio esperado para esta venta es {expected_receipt}",
+        )
     barber_in_shift = db.scalar(
         select(ShiftBarber.id).where(
             ShiftBarber.shift_id == shift.id,
@@ -142,6 +161,10 @@ def create_sale(payload: SaleCreate, db: DatabaseSession):
         raise HTTPException(status_code=400, detail="La cita no existe")
     if appointment and appointment.status in {"COMPLETED", "CANCELLED"}:
         raise HTTPException(status_code=409, detail="La cita ya tiene un estado final")
+    if appointment and appointment.barber_id is None:
+        raise HTTPException(status_code=400, detail="Asigna un barbero antes de cobrar la cita")
+    if appointment and appointment.service_id is None:
+        raise HTTPException(status_code=400, detail="Asigna un servicio antes de cobrar la cita")
     if appointment and (
         appointment.customer_id != payload.customer_id
         or appointment.barber_id != payload.barber_id
