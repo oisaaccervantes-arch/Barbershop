@@ -2,7 +2,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -50,14 +49,7 @@ def list_customers(
 def create_customer(payload: CustomerCreate, db: DatabaseSession):
     customer = Customer(**payload.model_dump())
     db.add(customer)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Ya existe un cliente con ese teléfono",
-        ) from exc
+    db.commit()
     db.refresh(customer)
     return customer
 
@@ -67,14 +59,7 @@ def update_customer(customer_id: int, payload: CustomerUpdate, db: DatabaseSessi
     customer = get_customer_or_404(customer_id, db)
     for field, value in payload.model_dump().items():
         setattr(customer, field, value)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Ya existe un cliente con ese teléfono",
-        ) from exc
+    db.commit()
     db.refresh(customer)
     return customer
 

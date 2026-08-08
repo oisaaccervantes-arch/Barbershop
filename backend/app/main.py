@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
@@ -15,12 +15,15 @@ from app.routers.cash_shifts import router as cash_shifts_router
 from app.routers.sales import router as sales_router
 from app.routers.services import router as services_router
 from app.routers.receptionists import router as receptionists_router
+from pathlib import Path
 
 
 app = FastAPI(
     title="Bizantino POS API",
     version="0.1.0",
 )
+
+FRONTEND_DIR = Path(__file__).resolve().parents[2]
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,7 +64,17 @@ async def require_authenticated_session(request: Request, call_next):
 
 @app.get("/")
 def root():
-    return {"message": "Bizantino POS API funcionando"}
+    return FileResponse(FRONTEND_DIR / "index.html")
+
+
+@app.get("/app.js", include_in_schema=False)
+def frontend_javascript():
+    return FileResponse(FRONTEND_DIR / "app.js", media_type="application/javascript")
+
+
+@app.get("/styles.css", include_in_schema=False)
+def frontend_styles():
+    return FileResponse(FRONTEND_DIR / "styles.css", media_type="text/css")
 
 
 @app.get("/api/health")

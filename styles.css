@@ -991,6 +991,13 @@ td small { color: var(--muted); }
 .production-fill { background: var(--gold); border-radius: inherit; height: 100%; min-width: 4px; }
 .chart-empty { color: var(--muted); margin: 60px 0; text-align: center; }
 
+.help-modal-card { max-height: 90vh; max-width: 760px; overflow-y: auto; width: min(760px, calc(100vw - 32px)); }
+.help-steps { display: grid; gap: 10px; margin-top: 18px; }
+.help-steps details { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 0 14px; }
+.help-steps summary { align-items: center; cursor: pointer; display: flex; font-weight: 800; gap: 10px; padding: 13px 0; }
+.help-steps summary span { align-items: center; background: var(--gold-soft); border-radius: 50%; display: inline-flex; height: 28px; justify-content: center; width: 28px; }
+.help-steps details p { color: var(--muted); line-height: 1.55; margin: 0 0 15px 38px; }
+
 @media (max-width: 900px) {
   .sales-charts-grid { grid-template-columns: 1fr; }
 }

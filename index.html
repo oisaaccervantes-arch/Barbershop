@@ -83,6 +83,10 @@
         <span class="material-symbols-outlined"></span>
         Corte de turno
       </button>
+      <button class="nav-item" id="openHelp" type="button">
+        <span class="material-symbols-outlined">help</span>
+        Ayuda
+      </button>
     </nav>
 
     <button class="primary-action" id="quickAppointment">
@@ -132,6 +136,9 @@
               pattern="[0-9]{10}" title="Ingresa exactamente 10 dígitos"
               placeholder="10 dígitos" required>
           </label>
+          <label class="hidden" data-customer-choice-wrap>Persona vinculada al teléfono
+            <select name="customerChoice"></select>
+          </label>
           <label>Cliente
             <input name="customer" placeholder="Se completa si el teléfono ya existe" required>
           </label>
@@ -161,6 +168,12 @@
             <span class="material-symbols-outlined">save</span>
             <span id="appointmentSubmitLabel">Guardar cita</span>
           </button>
+          <button class="secondary-button" id="saveAnotherAppointment" type="submit" data-save-another="true">
+            Guardar esta persona y agregar otra
+          </button>
+          <small id="saveAnotherAppointmentHelp">
+            Para varias personas con el mismo teléfono: guarda primero esta cita y conserva los datos para capturar la siguiente.
+          </small>
           <button class="secondary-button hidden" id="cancelAppointmentEdit" type="button">
             Cancelar edición
           </button>
@@ -233,6 +246,9 @@
             <input name="phone" list="customerPhoneOptions" inputmode="numeric" maxlength="10"
               pattern="[0-9]{10}" title="Ingresa exactamente 10 dígitos"
               placeholder="Vacío para público general">
+          </label>
+          <label class="hidden" data-customer-choice-wrap>Persona vinculada al teléfono
+            <select name="customerChoice"></select>
           </label>
           <label>Cliente
             <input name="customer" placeholder="Se completa si el teléfono ya existe">
@@ -600,8 +616,13 @@
             </section>
             <form class="cut-card" id="closeShiftForm">
               <p class="eyebrow">Conteo real</p>
-              <label>Efectivo contado
-                <input name="cashCounted" type="number" min="0" step="0.01" value="0" required>
+              <label>Fondo que permanece en caja
+                <input name="fundReserved" type="number" min="0" step="0.01" value="0" readonly>
+                <small>Se toma automáticamente del fondo registrado al abrir el turno.</small>
+              </label>
+              <label>Efectivo de ventas entregado
+                <input name="cashSalesCounted" type="number" min="0" step="0.01" value="0" required>
+                <small>No incluyas aquí el fondo que permanece en caja.</small>
               </label>
               <label>Corte de terminal
                 <input name="cardReported" type="number" min="0" step="0.01" value="0" required>
@@ -807,6 +828,58 @@
         <button class="submit-button danger-button" type="submit">Confirmar cancelación</button>
       </div>
     </form>
+  </div>
+
+  <div class="modal-backdrop hidden" id="helpModal">
+    <div class="modal-card help-modal-card">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Manual rápido</p>
+          <h3>Cómo usar Bizantino</h3>
+        </div>
+        <button class="icon-button" id="closeHelpModal" type="button" title="Cerrar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <p>Consulta el paso que necesites. Para trabajar el día completo sigue el orden del 1 al 7.</p>
+      <div class="help-steps">
+        <details open>
+          <summary><span>1</span> Preparar personal y servicios</summary>
+          <p>En <strong>Personal</strong>, edita o registra barberos y recepcionistas. En <strong>Catálogo</strong>, revisa nombres y precios. Desactiva registros que ya no deban utilizarse.</p>
+        </details>
+        <details>
+          <summary><span>2</span> Abrir el turno</summary>
+          <p>En <strong>Corte de turno</strong>, selecciona turno, fondo inicial, folio, recepcionista y barberos que trabajarán. El folio se sugiere automáticamente, pero puede modificarse.</p>
+        </details>
+        <details>
+          <summary><span>3</span> Agendar una cita</summary>
+          <p>Captura teléfono, cliente, fecha y hora. El barbero y los servicios pueden quedar sin asignar. Si el teléfono ya existe, el nombre del cliente se completará automáticamente.</p>
+        </details>
+        <details>
+          <summary><span>4</span> Confirmar una cita</summary>
+          <p>Presiona <strong>Confirmar</strong>. Si faltan datos, selecciona el barbero y uno o varios servicios. El sistema evitará choques de horario para el mismo barbero.</p>
+        </details>
+        <details>
+          <summary><span>5</span> Realizar un cobro</summary>
+          <p>Para una cita usa <strong>Cobrar</strong>; los servicios se cargarán en Caja. Para clientes sin cita entra directamente a <strong>Caja</strong>. Selecciona barbero, servicios y método de pago antes de cobrar.</p>
+        </details>
+        <details>
+          <summary><span>6</span> Revisar ventas y cancelaciones</summary>
+          <p>En <strong>Ventas</strong> filtra por fechas o barbero, consulta gráficas y revisa movimientos. Las cancelaciones conservan su motivo para seguimiento.</p>
+        </details>
+        <details>
+          <summary><span>7</span> Cerrar el turno</summary>
+          <p>En <strong>Corte de turno</strong>, registra gastos, efectivo contado, corte de terminal, transferencias verificadas y notas opcionales. Revisa las diferencias antes de cerrar definitivamente.</p>
+        </details>
+        <details>
+          <summary><span>8</span> Consultar información anterior</summary>
+          <p>Usa el historial de citas, Ventas y los turnos anteriores para consultar folios, servicios, producción por barbero, gastos y diferencias de caja.</p>
+        </details>
+      </div>
+      <div class="modal-actions">
+        <button class="submit-button" id="finishHelp" type="button">Entendido</button>
+      </div>
+    </div>
   </div>
 
   <div class="toast" id="toast"></div>

@@ -7,7 +7,7 @@ from sqlalchemy.engine import URL
 class Settings(BaseSettings):
     db_host: str = "127.0.0.1"
     db_port: int = 5432
-    db_name: str = "bizantino_pos_dev"
+    db_name: str = "bizantino_pos_piloto"
     db_user: str = "postgres"
     db_password: str
     auth_secret_key: str = "dev-only-change-before-production"

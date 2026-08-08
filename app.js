@@ -1,5 +1,9 @@
 const STORE_KEY = "bizantino-barberia-v1";
-const API_BASE_URL = "http://127.0.0.1:8000/api";
+const isLocalFrontendServer = ["127.0.0.1", "localhost"].includes(window.location.hostname)
+  && window.location.port !== "8000";
+const API_BASE_URL = isLocalFrontendServer
+  ? "http://127.0.0.1:8000/api"
+  : `${window.location.origin}/api`;
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input, init = {}) => {
   const response = await originalFetch(input, { ...init, credentials: "include" });
@@ -329,7 +333,7 @@ async function updateAppointmentStatus(appointmentId, status, cancellationNote =
   }
 }
 
-async function ensureCustomer(name, phone, birthDate = "") {
+async function ensureCustomer(name, phone, birthDate = "", customerId = null) {
   const normalizedName = name.trim();
   const normalizedPhone = phone.trim();
   const normalizedBirthDate = parseBirthDate(birthDate);
@@ -338,8 +342,11 @@ async function ensureCustomer(name, phone, birthDate = "") {
     throw new Error("El teléfono debe tener 10 dígitos");
   }
 
-  const existingCustomer = catalogCustomers.find(
-    customer => customer.phone === normalizedPhone
+  const existingCustomer = catalogCustomers.find(customer =>
+    customer.id === String(customerId || "")
+  ) || catalogCustomers.find(customer =>
+    customer.phone === normalizedPhone
+      && customer.name.toLocaleLowerCase("es-MX") === normalizedName.toLocaleLowerCase("es-MX")
   );
   if (existingCustomer) {
     if (!existingCustomer.active) {
@@ -426,7 +433,10 @@ function resetAppointmentForm() {
   renderAppointmentServiceOptions();
   $("#appointmentFormTitle").textContent = "Nueva cita";
   $("#appointmentSubmitLabel").textContent = "Guardar cita";
+  $("#saveAnotherAppointment").classList.remove("hidden");
+  $("#saveAnotherAppointmentHelp").classList.remove("hidden");
   $("#cancelAppointmentEdit").classList.add("hidden");
+  form.querySelector("[data-customer-choice-wrap]").classList.add("hidden");
 }
 
 function timeToMinutes(value) {
@@ -477,25 +487,46 @@ function resetCustomerForm() {
   $("#cancelCustomerEdit").classList.add("hidden");
 }
 
-function autofillCustomerByPhone(form) {
-  const phone = form.phone.value;
-  const customer = phone.length === 10
-    ? catalogCustomers.find(item => item.active && item.phone === phone)
-    : null;
-
-  if (customer) {
-    form.customer.value = customer.name;
-    form.customer.readOnly = true;
-    form.customer.dataset.customerId = customer.id;
-    form.birthDate.value = formatBirthDate(customer.birthDate);
-    showToast("Cliente encontrado");
-  } else {
+function applyCustomerChoice(form, choice) {
+  if (!choice || choice === "__new__") {
     if (form.customer.dataset.customerId) {
       form.customer.value = "";
-      delete form.customer.dataset.customerId;
       form.birthDate.value = "";
     }
+    delete form.customer.dataset.customerId;
     form.customer.readOnly = false;
+    return;
+  }
+  const customer = catalogCustomers.find(item => item.id === choice);
+  if (!customer) return;
+  form.customer.value = customer.name;
+  form.customer.readOnly = true;
+  form.customer.dataset.customerId = customer.id;
+  form.birthDate.value = formatBirthDate(customer.birthDate);
+  form.birthDate.disabled = false;
+}
+
+function autofillCustomerByPhone(form, chooseNew = false) {
+  const phone = form.phone.value.trim();
+  const matches = phone.length === 10
+    ? catalogCustomers.filter(item => item.active && item.phone === phone)
+    : [];
+  const wrapper = form.querySelector("[data-customer-choice-wrap]");
+  const select = form.customerChoice;
+  if (matches.length) {
+    const currentId = form.customer.dataset.customerId;
+    select.innerHTML = matches.map(customer =>
+      `<option value="${customer.id}">${escapeHtml(customer.name)}${customer.birthDate ? ` · ${formatBirthDate(customer.birthDate)}` : ""}</option>`
+    ).join("") + `<option value="__new__">+ Agregar otra persona</option>`;
+    wrapper.classList.remove("hidden");
+    select.value = chooseNew
+      ? "__new__"
+      : (matches.some(customer => customer.id === currentId) ? currentId : matches[0].id);
+    applyCustomerChoice(form, select.value);
+    showToast(matches.length === 1 ? "Persona encontrada" : `${matches.length} personas usan este teléfono`);
+  } else {
+    wrapper.classList.add("hidden");
+    applyCustomerChoice(form, "__new__");
   }
   if (form.id === "saleForm") {
     birthdayDiscountServiceId = null;
@@ -524,9 +555,12 @@ function formatAppointmentDate(isoDate) {
 
 function currentSaleCustomer() {
   const form = $("#saleForm");
-  return catalogCustomers.find(customer =>
-    customer.active && customer.phone === form.phone.value.trim()
-  );
+  return catalogCustomers.find(customer => customer.id === form.customer.dataset.customerId)
+    || catalogCustomers.find(customer =>
+      customer.active
+      && customer.phone === form.phone.value.trim()
+      && customer.name.toLocaleLowerCase("es-MX") === form.customer.value.trim().toLocaleLowerCase("es-MX")
+    );
 }
 
 const roundMoney = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
@@ -960,7 +994,9 @@ function renderShift() {
   const transferSales = byMethod("TRANSFER");
   const expenses = currentShift.expenses || [];
   const expenseTotal = roundMoney(expenses.reduce((sum, expense) => sum + Number(expense.amount), 0));
-  const expectedCash = roundMoney(Number(currentShift.opening_cash) + cashSales - expenseTotal);
+  const expectedSalesCash = roundMoney(cashSales - expenseTotal);
+  const expectedCash = roundMoney(Number(currentShift.opening_cash) + expectedSalesCash);
+  $("#closeShiftForm").fundReserved.value = Number(currentShift.opening_cash);
 
   $("#shiftSystemTotals").innerHTML = `
     <div class="cut-line"><span>Fondo inicial</span><strong>${money(currentShift.opening_cash)}</strong></div>
@@ -968,7 +1004,8 @@ function renderShift() {
     <div class="cut-line"><span>Gastos</span><strong>-${money(expenseTotal)}</strong></div>
     <div class="cut-line"><span>Tarjeta</span><strong>${money(cardSales)}</strong></div>
     <div class="cut-line"><span>Transferencias</span><strong>${money(transferSales)}</strong></div>
-    <div class="cut-line total"><span>Efectivo esperado</span><strong>${money(expectedCash)}</strong></div>
+    <div class="cut-line"><span>Efectivo de ventas esperado</span><strong>${money(expectedSalesCash)}</strong></div>
+    <div class="cut-line total"><span>Total efectivo esperado con fondo</span><strong>${money(expectedCash)}</strong></div>
     <div class="cut-line total"><span>Venta total</span><strong>${money(total)}</strong></div>
   `;
 
@@ -1033,7 +1070,7 @@ function renderShift() {
     </tr>
   `).join("") || `<tr><td colspan="6">Todavia no hay ventas en este turno.</td></tr>`;
 
-  updateReconciliation(expectedCash, cardSales, transferSales);
+  updateReconciliation(expectedSalesCash, cardSales, transferSales);
 }
 
 function shiftFinancialSummary(shift) {
@@ -1048,7 +1085,8 @@ function shiftFinancialSummary(shift) {
   const expenses = roundMoney((shift.expenses || []).reduce(
     (sum, expense) => sum + Number(expense.amount), 0
   ));
-  const expectedCash = roundMoney(Number(shift.opening_cash) + byMethod("CASH") - expenses);
+  const expectedSalesCash = roundMoney(byMethod("CASH") - expenses);
+  const expectedCash = roundMoney(Number(shift.opening_cash) + expectedSalesCash);
   const difference = shift.status === "CLOSED" ? roundMoney(
     Number(shift.cash_counted || 0) - expectedCash
     + Number(shift.card_reported || 0) - byMethod("CARD")
@@ -1060,6 +1098,7 @@ function shiftFinancialSummary(shift) {
     cash: byMethod("CASH"),
     card: byMethod("CARD"),
     transfer: byMethod("TRANSFER"),
+    expectedSalesCash,
     expectedCash,
     expenses,
     difference,
@@ -1096,8 +1135,10 @@ function historicalShiftDetail(shift, summary) {
         <h4>Conciliación</h4>
         <div class="cut-line"><span>Recepcionista</span><strong>${escapeHtml(shift.receptionist?.name || "Sin registrar")}</strong></div>
         <div class="cut-line"><span>Fondo inicial</span><strong>${money(shift.opening_cash)}</strong></div>
-        <div class="cut-line"><span>Efectivo esperado</span><strong>${money(summary.expectedCash)}</strong></div>
-        <div class="cut-line"><span>Efectivo contado</span><strong>${money(shift.cash_counted)}</strong></div>
+        <div class="cut-line"><span>Fondo que quedó en caja</span><strong>${money(shift.opening_cash)}</strong></div>
+        <div class="cut-line"><span>Efectivo de ventas esperado</span><strong>${money(summary.expectedSalesCash)}</strong></div>
+        <div class="cut-line"><span>Efectivo de ventas entregado</span><strong>${money(Math.max(0, Number(shift.cash_counted || 0) - Number(shift.opening_cash)))}</strong></div>
+        <div class="cut-line"><span>Total efectivo contado</span><strong>${money(shift.cash_counted)}</strong></div>
         <div class="cut-line"><span>Diferencia efectivo</span>${differenceLine(cashDifference)}</div>
         <div class="cut-line"><span>Tarjeta sistema / terminal</span><strong>${money(summary.card)} / ${money(shift.card_reported)}</strong></div>
         <div class="cut-line"><span>Diferencia tarjeta</span>${differenceLine(cardDifference)}</div>
@@ -1166,10 +1207,10 @@ function renderShiftHistory() {
   }).join("") || `<tr><td colspan="9">Todavía no hay turnos cerrados.</td></tr>`;
 }
 
-function updateReconciliation(expectedCash, expectedCard, expectedTransfer) {
+function updateReconciliation(expectedSalesCash, expectedCard, expectedTransfer) {
   if (!currentShift) return;
   const form = $("#closeShiftForm");
-  const cashDifference = roundMoney(Number(form.cashCounted.value || 0) - expectedCash);
+  const cashDifference = roundMoney(Number(form.cashSalesCounted.value || 0) - expectedSalesCash);
   const cardDifference = roundMoney(Number(form.cardReported.value || 0) - expectedCard);
   const transferDifference = roundMoney(Number(form.transferReported.value || 0) - expectedTransfer);
   const difference = roundMoney(cashDifference + cardDifference + transferDifference);
@@ -1258,9 +1299,20 @@ function renderSalesReport() {
     0
   );
   const total = sales.reduce((sum, sale) => sum + sale.total, 0);
+  const shiftsById = new Map(shiftHistory.map(shift => [String(shift.id), shift]));
+  if (currentShift) shiftsById.set(String(currentShift.id), currentShift);
+  const expenseTotal = roundMoney([...shiftsById.values()]
+    .filter(shift => !dateFrom || shift.business_date >= dateFrom)
+    .filter(shift => !dateTo || shift.business_date <= dateTo)
+    .reduce((sum, shift) => sum + (shift.expenses || [])
+      .reduce((expenseSum, expense) => expenseSum + Number(expense.amount), 0), 0));
+  const showsWholeBusiness = barberId === "ALL" && !query;
+  const netAfterExpenses = roundMoney(total - expenseTotal);
 
   $("#salesReportSummary").innerHTML = [
-    ["Total", money(total)],
+    ["Ventas brutas", money(total)],
+    ["Gastos", money(expenseTotal)],
+    ["Neto después de gastos", showsWholeBusiness ? money(netAfterExpenses) : "—"],
     ["Efectivo", money(paymentTotal("CASH"))],
     ["Tarjeta", money(paymentTotal("CARD"))],
     ["Transferencia", money(paymentTotal("TRANSFER"))],
@@ -1670,6 +1722,9 @@ document.addEventListener("click", async event => {
         form.barber.disabled = false;
         $("#appointmentFormTitle").textContent = "Editar cita";
         $("#appointmentSubmitLabel").textContent = "Guardar cambios";
+        $("#saveAnotherAppointment").classList.add("hidden");
+        $("#saveAnotherAppointmentHelp").classList.add("hidden");
+        form.querySelector("[data-customer-choice-wrap]").classList.add("hidden");
         $("#cancelAppointmentEdit").classList.remove("hidden");
         form.time.focus();
       }
@@ -1715,6 +1770,12 @@ document.addEventListener("click", async event => {
 });
 
 $("#quickAppointment").addEventListener("click", () => switchView("appointments"));
+function closeHelpModal() {
+  $("#helpModal").classList.add("hidden");
+}
+$("#openHelp").addEventListener("click", () => $("#helpModal").classList.remove("hidden"));
+$("#closeHelpModal").addEventListener("click", closeHelpModal);
+$("#finishHelp").addEventListener("click", closeHelpModal);
 $("#appointmentSearch").addEventListener("input", renderAppointments);
 $("#clearCart").addEventListener("click", () => {
   cart = [];
@@ -1936,10 +1997,18 @@ $("#backToSales").addEventListener("click", () =>
 $("#appointmentForm").phone.addEventListener("input", () =>
   autofillCustomerByPhone($("#appointmentForm"))
 );
+$("#appointmentForm").customerChoice.addEventListener("change", event =>
+  applyCustomerChoice($("#appointmentForm"), event.target.value)
+);
 $("#appointmentForm").date.addEventListener("change", updateAppointmentBarberOptions);
 $("#saleForm").phone.addEventListener("input", () =>
   autofillCustomerByPhone($("#saleForm"))
 );
+$("#saleForm").customerChoice.addEventListener("change", event => {
+  applyCustomerChoice($("#saleForm"), event.target.value);
+  birthdayDiscountServiceId = null;
+  renderCart();
+});
 document.querySelectorAll('input[name="birthDate"]').forEach(input => {
   input.addEventListener("input", () => {
     const digits = input.value.replace(/\D/g, "").slice(0, 8);
@@ -2012,15 +2081,19 @@ $("#closeShiftForm").addEventListener("submit", async event => {
   event.preventDefault();
   if (!currentShift) return;
   const form = event.currentTarget;
+  const fundReserved = Number(currentShift.opening_cash || 0);
+  const cashSalesCounted = Number(form.cashSalesCounted.value || 0);
   pendingCloseShiftData = {
-    cash_counted: Number(form.cashCounted.value || 0),
+    cash_counted: roundMoney(fundReserved + cashSalesCounted),
     card_reported: Number(form.cardReported.value || 0),
     transfer_reported: Number(form.transferReported.value || 0),
     closing_notes: form.closingNotes.value.trim() || null
   };
   $("#closeShiftConfirmationSummary").innerHTML = `
     <div class="cut-line"><span>Turno</span><strong>${currentShift.shift_type === "MORNING" ? "Matutino" : "Vespertino"}</strong></div>
-    <div class="cut-line"><span>Efectivo contado</span><strong>${money(pendingCloseShiftData.cash_counted)}</strong></div>
+    <div class="cut-line"><span>Fondo que queda en caja</span><strong>${money(fundReserved)}</strong></div>
+    <div class="cut-line"><span>Efectivo de ventas entregado</span><strong>${money(cashSalesCounted)}</strong></div>
+    <div class="cut-line"><span>Total efectivo contado</span><strong>${money(pendingCloseShiftData.cash_counted)}</strong></div>
     <div class="cut-line"><span>Corte de terminal</span><strong>${money(pendingCloseShiftData.card_reported)}</strong></div>
     <div class="cut-line"><span>Transferencias</span><strong>${money(pendingCloseShiftData.transfer_reported)}</strong></div>
     <div class="cut-line total"><span>Resultado</span><strong>${$("#reconciliationResult strong").textContent}</strong></div>
@@ -2067,8 +2140,14 @@ $("#appointmentForm").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.currentTarget;
   const appointmentId = form.appointmentId.value;
+  const saveAnother = !appointmentId && event.submitter?.dataset.saveAnother === "true";
+  const retainedValues = saveAnother ? {
+    phone: form.phone.value,
+    date: form.date.value,
+    time: form.time.value
+  } : null;
   const serviceIds = checkedServiceIds("appointmentServiceOptions");
-  const submitButton = form.querySelector('button[type="submit"]');
+  const submitButton = event.submitter || form.querySelector('button[type="submit"]');
   const duplicate = appointmentConflicts(form, appointmentId || null);
   if (duplicate) {
     showToast("Ese barbero ya tiene una cita dentro de ese lapso de 15 minutos");
@@ -2078,7 +2157,12 @@ $("#appointmentForm").addEventListener("submit", async event => {
   try {
     const customer = appointmentId
       ? null
-      : await ensureCustomer(form.customer.value, form.phone.value, form.birthDate.value);
+      : await ensureCustomer(
+          form.customer.value,
+          form.phone.value,
+          form.birthDate.value,
+          form.customer.dataset.customerId
+        );
     const response = await fetch(
       appointmentId
         ? `${API_BASE_URL}/appointments/${appointmentId}`
@@ -2107,9 +2191,20 @@ $("#appointmentForm").addEventListener("submit", async event => {
 
     await loadAppointmentsFromApi();
     resetAppointmentForm();
+    if (retainedValues) {
+      form.phone.value = retainedValues.phone;
+      form.date.value = retainedValues.date;
+      form.time.value = retainedValues.time;
+      autofillCustomerByPhone(form, true);
+    }
     saveState();
     renderAll();
-    showToast(appointmentId ? "Cita actualizada" : "Cita guardada");
+    if (retainedValues) form.customer.focus();
+    showToast(
+      appointmentId
+        ? "Cita actualizada"
+        : (saveAnother ? "Cita guardada. Agrega a la siguiente persona" : "Cita guardada")
+    );
   } catch (error) {
     console.error(error);
     showToast(error.message || "No se pudo registrar la cita");
@@ -2262,7 +2357,8 @@ $("#saleForm").addEventListener("submit", async event => {
     const customer = await ensureCustomer(
       form.customer.value,
       form.phone.value,
-      form.birthDate.value
+      form.birthDate.value,
+      form.customer.dataset.customerId
     );
     const total = getCartTotal();
     const birthdayDiscount = getBirthdayDiscount();
@@ -2301,6 +2397,7 @@ $("#saleForm").addEventListener("submit", async event => {
     form.reset();
     form.customer.readOnly = false;
     delete form.customer.dataset.customerId;
+    form.querySelector("[data-customer-choice-wrap]").classList.add("hidden");
     pendingAppointmentId = null;
     await Promise.all([
       loadSalesFromApi(),
