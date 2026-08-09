@@ -1,4 +1,5 @@
 const STORE_KEY = "bizantino-barberia-v1";
+const ACTIVE_VIEW_KEY = "bizantino-active-view";
 const isLocalFrontendServer = ["127.0.0.1", "localhost"].includes(window.location.hostname)
   && window.location.port !== "8000";
 const API_BASE_URL = isLocalFrontendServer
@@ -56,6 +57,7 @@ let catalogServices = [];
 let catalogBarbers = [];
 let catalogReceptionists = [];
 let catalogCustomers = [];
+let systemUsers = [];
 let pendingAppointmentId = null;
 let appointmentView = "active";
 let birthdayDiscountServiceId = null;
@@ -76,6 +78,7 @@ let workSchedules = [];
 let scheduleCopySourceCell = null;
 let selectedSchedulePeople = new Set();
 let scheduleSelectionContext = "";
+let pendingAttendanceStatus = null;
 
 const appointmentStatusFromApi = {
   PENDING: "pendiente",
@@ -323,6 +326,16 @@ async function loadAttendanceFromApi() {
   workSchedules = await schedulesResponse.json();
 }
 
+async function loadUsersFromApi() {
+  if (authenticatedUser?.role !== "ADMIN") {
+    systemUsers = [];
+    return;
+  }
+  const response = await fetch(`${API_BASE_URL}/users`);
+  if (!response.ok) throw new Error("No fue posible consultar las cuentas");
+  systemUsers = await response.json();
+}
+
 async function loadSuggestedReceiptFromApi() {
   const response = await fetch(`${API_BASE_URL}/shifts/next-receipt`);
   if (!response.ok) throw new Error("No fue posible consultar el siguiente folio");
@@ -499,6 +512,17 @@ function resetReceptionistForm() {
   $("#cancelReceptionistEdit").classList.add("hidden");
 }
 
+function resetUserForm() {
+  const form = $("#userForm");
+  form.reset();
+  form.userId.value = "";
+  form.password.required = true;
+  $("#userFormTitle").textContent = "Crear cuenta";
+  $("#userSubmitLabel").textContent = "Crear cuenta";
+  $("#userPasswordHelp").textContent = "Obligatoria para una cuenta nueva.";
+  $("#cancelUserEdit").classList.add("hidden");
+}
+
 function resetCustomerForm() {
   const form = $("#customerForm");
   form.reset();
@@ -598,8 +622,7 @@ const getCartSubtotal = () => roundMoney(
   cart.reduce((sum, item) => sum + Number(item.price), 0)
 );
 const getBirthdayDiscount = () => {
-  const item = cart.find(entry => String(entry.id) === String(birthdayDiscountServiceId));
-  return item ? roundMoney(Number(item.price) / 2) : 0;
+  return birthdayDiscountServiceId === "ALL" ? roundMoney(getCartSubtotal() / 2) : 0;
 };
 const getCartTotal = () => roundMoney(getCartSubtotal() - getBirthdayDiscount());
 
@@ -667,7 +690,7 @@ function showToast(message) {
   const toast = $("#toast");
   toast.textContent = message;
   toast.classList.add("show");
-  setTimeout(() => toast.classList.remove("show"), 1800);
+  setTimeout(() => toast.classList.remove("show"), 3500);
 }
 
 function renderSelects() {
@@ -772,7 +795,8 @@ async function loadApplicationData() {
     loadCurrentShiftFromApi(),
     loadShiftHistoryFromApi(),
     loadSuggestedReceiptFromApi(),
-    loadAttendanceFromApi()
+    loadAttendanceFromApi(),
+    loadUsersFromApi()
   ]);
   renderAll();
 }
@@ -931,6 +955,23 @@ function renderReceptionists() {
   `).join("") || `<div class="cart-empty">No hay recepcionistas registradas.</div>`;
 }
 
+function renderUsers() {
+  const container = $("#userList");
+  if (!container) return;
+  container.innerHTML = systemUsers.map(user => `
+    <div class="price-item ${user.active ? "" : "inactive"}">
+      <div>
+        <strong>${escapeHtml(user.full_name)}</strong>
+        <span>@${escapeHtml(user.username)} · ${user.role === "ADMIN" ? "Administradora" : "Recepcionista"} · ${user.active ? "Activa" : "Inactiva"}</span>
+      </div>
+      <div class="catalog-actions">
+        <button class="chip-button" type="button" data-edit-user="${user.id}">Editar</button>
+        <button class="chip-button ${user.active ? "danger" : "pay"}" type="button" data-toggle-user="${user.id}" ${user.id === authenticatedUser?.id ? 'disabled title="No puedes desactivar tu propia cuenta"' : ""}>${user.active ? "Desactivar" : "Activar"}</button>
+      </div>
+    </div>
+  `).join("") || `<div class="cart-empty">No hay cuentas registradas.</div>`;
+}
+
 function renderCustomers() {
   const query = ($("#customerSearch")?.value || "").trim().toLowerCase();
   const customers = catalogCustomers.filter(customer =>
@@ -961,6 +1002,9 @@ function renderCart() {
   );
   if (!canUseBirthdayDiscount) birthdayDiscountServiceId = null;
   $("#birthdayNotice").classList.toggle("hidden", !canUseBirthdayDiscount);
+  $("#birthdaySaleDiscount").textContent = birthdayDiscountServiceId === "ALL"
+    ? "Quitar descuento de cumpleaños"
+    : "Aplicar 50 % a toda la venta";
 
   if (!cart.length) {
     $("#cartItems").innerHTML = `<div class="cart-empty">Selecciona servicios para cobrar.</div>`;
@@ -970,12 +1014,6 @@ function renderCart() {
         <div>
           <strong>${item.name}</strong>
           <span>${money(item.price)}</span>
-          ${canUseBirthdayDiscount ? `
-            <button class="chip-button ${String(item.id) === String(birthdayDiscountServiceId) ? "pay" : ""}"
-              type="button" data-birthday-discount="${item.id}">
-              ${String(item.id) === String(birthdayDiscountServiceId) ? "50 % aplicado" : "Aplicar 50 %"}
-            </button>
-          ` : ""}
         </div>
         <button class="icon-button" type="button" data-remove="${index}" title="Quitar">
           <span class="material-symbols-outlined">close</span>
@@ -989,6 +1027,33 @@ function renderCart() {
     ? `<span class="birthday-discount">-${money(discount)}</span> ${money(getCartTotal())}`
     : money(getCartTotal());
   updatePaymentFields();
+}
+
+function applyScheduledStaffToOpenShift() {
+  if (currentShift) return;
+  const form = $("#openShiftForm");
+  const businessDate = todayISO();
+  const date = new Date(`${businessDate}T12:00:00`);
+  const weekStart = mondayIso(date);
+  const dayOfWeek = (date.getDay() + 6) % 7;
+  const scheduled = workSchedules.filter(item =>
+    String(item.week_start).slice(0, 10) === weekStart &&
+    item.shift_type === form.shiftType.value &&
+    Number(item.day_of_week) === dayOfWeek &&
+    item.status === "WORK"
+  );
+  const barberIds = new Set(
+    scheduled.filter(item => item.person_type === "BARBER").map(item => String(item.person_id))
+  );
+  form.querySelectorAll('input[name="barberIds"]').forEach(input => {
+    input.checked = barberIds.has(input.value);
+  });
+  const receptionists = scheduled.filter(item => item.person_type === "RECEPTIONIST");
+  form.receptionistId.value = receptionists.length ? String(receptionists[0].person_id) : "";
+  const label = form.shiftType.value === "MORNING" ? "matutino" : "vespertino";
+  $("#shiftScheduleStatus").textContent = scheduled.length
+    ? `Selección cargada automáticamente del horario ${label} de hoy. Puedes modificarla antes de abrir.`
+    : `No hay personal programado para el turno ${label} de hoy. Selecciónalo manualmente.`;
 }
 
 function renderShift() {
@@ -1017,6 +1082,7 @@ function renderShift() {
     .filter(barber => barber.active)
     .map(barber => `<label><input type="checkbox" name="barberIds" value="${barber.id}"> ${escapeHtml(barber.name)}</label>`)
     .join("");
+  if (!currentShift) applyScheduledStaffToOpenShift();
   $("#saleForm").receiptNumber.disabled = !currentShift;
   if (currentShift && !$("#saleForm").receiptNumber.value) {
     $("#saleForm").receiptNumber.value = currentShift.next_receipt_number;
@@ -1035,9 +1101,16 @@ function renderShift() {
   const evidenceStatus = $("#shiftEvidenceStatus");
   const evidencePreview = $("#shiftEvidencePreview");
   const closeShiftButton = $("#closeShiftButton");
+  const hasEvidence = Boolean(currentShift.evidence_url);
   evidenceStatus.textContent = currentShift.evidence_url ? "Adjuntada" : "Pendiente";
-  evidenceStatus.classList.toggle("complete", Boolean(currentShift.evidence_url));
+  evidenceStatus.classList.toggle("complete", hasEvidence);
+  ["cashSalesCounted", "cardReported", "transferReported", "closingNotes"].forEach(field => {
+    $("#closeShiftForm")[field].disabled = !hasEvidence;
+  });
+  $("#closeShiftForm").classList.toggle("evidence-locked", !hasEvidence);
+  $("#closeShiftEvidenceNotice").classList.toggle("hidden", hasEvidence);
   closeShiftButton.classList.toggle("requires-evidence", !currentShift.evidence_url);
+  closeShiftButton.disabled = !hasEvidence;
   if (currentShift.evidence_url) closeShiftButton.removeAttribute("aria-describedby");
   else closeShiftButton.setAttribute("aria-describedby", "shiftEvidenceStatus");
   closeShiftButton.title = currentShift.evidence_url ? "" : "Adjunta la evidencia del checador para cerrar";
@@ -1557,6 +1630,35 @@ function renderWeeklySchedule() {
     }).join("");
     return `<tr><th class="schedule-person"><strong>${escapeHtml(person.name)}</strong><small>${person.personType === "BARBER" ? "Barbero" : "Recepción"}</small></th>${cells}</tr>`;
   }).join("") || `<tr><td colspan="8">Selecciona arriba el personal que trabajará en este turno.</td></tr>`;
+  renderSavedScheduleSummary(selectedWeek);
+}
+
+function renderSavedScheduleSummary(selectedWeek) {
+  const weekDate = new Date(`${selectedWeek}T12:00:00`);
+  const weekEnd = new Date(weekDate);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+  $("#savedSchedulesWeekLabel").textContent = `Del ${weekDate.toLocaleDateString("es-MX")} al ${weekEnd.toLocaleDateString("es-MX")}`;
+  const people = schedulePeople();
+  const card = (shiftType, title) => {
+    const entries = workSchedules.filter(item =>
+      String(item.week_start).slice(0, 10) === selectedWeek && item.shift_type === shiftType
+    );
+    const keys = [...new Set(entries.map(item => schedulePersonKey(item.person_type, item.person_id)))];
+    const names = keys.map(key => {
+      const person = people.find(item => schedulePersonKey(item.personType, item.id) === key);
+      return person?.name || "Personal no disponible";
+    });
+    return `<div>
+      <p class="eyebrow">Turno</p>
+      <h4>${title}</h4>
+      ${names.length
+        ? `<p>${names.map(escapeHtml).join(", ")}</p><small>${entries.length} días configurados</small>`
+        : `<p class="muted">Todavía no se ha configurado este turno.</p>`}
+    </div>
+    <button class="secondary-button compact" type="button" data-view-saved-schedule="${shiftType}">${names.length ? "Ver o editar" : "Configurar"}</button>`;
+  };
+  $("#savedScheduleMorning").innerHTML = card("MORNING", "Matutino");
+  $("#savedScheduleEvening").innerHTML = card("EVENING", "Vespertino");
 }
 
 function renderAttendance() {
@@ -1630,28 +1732,40 @@ function renderAttendance() {
         if (minutes < 0) return `<span class="attendance-early">${Math.abs(minutes)} min antes</span>`;
         return `<span class="attendance-late">+${minutes} min</span>`;
       };
+      const shiftMatrix = (shiftType, title) => {
+        const people = [...matrixRows.values()]
+          .filter(person => person.shiftType === shiftType)
+          .sort((a, b) => a.name.localeCompare(b.name));
+        if (!people.length) return `<section class="attendance-shift-section"><h4>${title}</h4><p class="muted">Sin registros para este turno.</p></section>`;
+        return `<section class="attendance-shift-section">
+          <h4>${title}</h4>
+          <div class="table-wrap"><table class="attendance-matrix">
+            <thead><tr><th>Personal</th>${dayHeaders}</tr></thead>
+            <tbody>${people.map(person => `
+              <tr><th class="attendance-matrix-person"><strong>${escapeHtml(person.name)}</strong><small>${person.personType === "BARBER" ? "Barbero" : "Recepción"}</small></th>
+                ${weekDayLabels.map((_, dayIndex) => {
+                  const record = person.days.get(dayIndex);
+                  if (!record) return `<td class="attendance-matrix-empty">—</td>`;
+                  const programmed = record.scheduled_start ? `${record.scheduled_start.slice(0, 5)}–${record.scheduled_end.slice(0, 5)}` : "Sin horario";
+                  return `<td class="attendance-matrix-cell">
+                    <small>Programado</small><strong>${programmed}</strong>
+                    <small>Entrada real</small><strong>${attendanceTime(record.clock_in)}</strong>
+                    <small>Salida real</small><strong>${attendanceTime(record.clock_out)}</strong>
+                    ${differenceLabel(record)}
+                    ${record.recorded_by_name ? `<small>Registró: ${escapeHtml(record.recorded_by_name)}</small>` : ""}
+                    ${record.corrected_by_name ? `<small>Corrigió: ${escapeHtml(record.corrected_by_name)}</small>` : ""}
+                    ${authenticatedUser?.role === "ADMIN" ? `<button class="schedule-repeat-button" data-correct-attendance="${record.id}">Corregir</button>` : ""}
+                  </td>`;
+                }).join("")}
+              </tr>`).join("")}</tbody>
+          </table></div>
+        </section>`;
+      };
       return `<details class="attendance-week" ${index === 0 ? "open" : ""}>
         <summary><span><strong>Semana del ${range}</strong><small>${records.length} registros · ${present} asistencias</small></span></summary>
         <div class="attendance-export-row"><button class="secondary-button compact" type="button" data-export-attendance-week="${week}"><span class="material-symbols-outlined">download</span> Exportar Excel</button></div>
-        <div class="table-wrap"><table class="attendance-matrix">
-          <thead><tr><th>Personal</th>${dayHeaders}</tr></thead>
-          <tbody>${[...matrixRows.values()].sort((a, b) => a.name.localeCompare(b.name)).map(person => `
-            <tr><th class="attendance-matrix-person"><strong>${escapeHtml(person.name)}</strong><small>${person.personType === "BARBER" ? "Barbero" : "Recepción"} · ${shiftTypeLabels[person.shiftType]}</small></th>
-              ${weekDayLabels.map((_, dayIndex) => {
-                const record = person.days.get(dayIndex);
-                if (!record) return `<td class="attendance-matrix-empty">—</td>`;
-                const programmed = record.scheduled_start ? `${record.scheduled_start.slice(0, 5)}–${record.scheduled_end.slice(0, 5)}` : "Sin horario";
-                return `<td class="attendance-matrix-cell">
-                  <small>Programado</small><strong>${programmed}</strong>
-                  <small>Llegó</small><strong>${attendanceTime(record.clock_in)}</strong>
-                  ${differenceLabel(record)}
-                  ${record.recorded_by_name ? `<small>Registró: ${escapeHtml(record.recorded_by_name)}</small>` : ""}
-                  ${record.corrected_by_name ? `<small>Corrigió: ${escapeHtml(record.corrected_by_name)}</small>` : ""}
-                  ${authenticatedUser?.role === "ADMIN" ? `<button class="schedule-repeat-button" data-correct-attendance="${record.id}">Corregir</button>` : ""}
-                </td>`;
-              }).join("")}
-            </tr>`).join("")}</tbody>
-        </table></div>
+        ${shiftMatrix("MORNING", "Turno matutino")}
+        ${shiftMatrix("EVENING", "Turno vespertino")}
       </details>`;
     }).join("") || `<div class="cart-empty">Todavía no hay asistencias registradas.</div>`;
 }
@@ -1663,6 +1777,7 @@ function renderAll() {
   renderServices();
   renderBarbers();
   renderReceptionists();
+  renderUsers();
   renderCustomers();
   renderCart();
   renderShift();
@@ -1673,6 +1788,7 @@ function renderAll() {
 }
 
 function switchView(view) {
+  if (!document.getElementById(view)?.classList.contains("view")) view = "appointments";
   document.querySelectorAll(".view").forEach(item => item.classList.toggle("active", item.id === view));
   document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.view === view));
   const titles = {
@@ -1686,6 +1802,7 @@ function switchView(view) {
     attendance: "Checador"
   };
   $("#viewTitle").textContent = titles[view] || view;
+  sessionStorage.setItem(ACTIVE_VIEW_KEY, view);
 }
 
 function printBlock(html) {
@@ -1766,24 +1883,66 @@ function shiftTicket() {
   `;
 }
 
+async function registerAttendanceEvent(recordId, attendanceEvent) {
+  const response = await fetch(`${API_BASE_URL}/attendance/${recordId}/event`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event: attendanceEvent })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.detail || "No fue posible registrar la asistencia");
+  await loadAttendanceFromApi();
+  renderAttendance();
+  showToast("Asistencia actualizada");
+}
+
+function closeAttendanceStatusModal() {
+  pendingAttendanceStatus = null;
+  $("#attendanceStatusModal").classList.add("hidden");
+}
+
+function openAttendanceStatusModal(recordId, attendanceEvent) {
+  const record = currentAttendance.find(item => String(item.id) === String(recordId));
+  const isAbsent = attendanceEvent === "ABSENT";
+  pendingAttendanceStatus = { recordId, attendanceEvent };
+  $("#attendanceStatusTitle").textContent = isAbsent ? "Asignar falta" : "Registrar permiso";
+  $("#attendanceStatusMessage").textContent = isAbsent
+    ? `¿Estás seguro de asignar una falta a ${record?.person_name || "esta persona"}?`
+    : `¿Estás seguro de registrar un permiso para ${record?.person_name || "esta persona"}?`;
+  $("#confirmAttendanceStatus").textContent = isAbsent ? "Sí, asignar falta" : "Sí, registrar permiso";
+  $("#attendanceStatusModal").classList.remove("hidden");
+}
+
+$("#closeAttendanceStatus").addEventListener("click", closeAttendanceStatusModal);
+$("#cancelAttendanceStatus").addEventListener("click", closeAttendanceStatusModal);
+$("#confirmAttendanceStatus").addEventListener("click", async event => {
+  if (!pendingAttendanceStatus) return;
+  const pending = { ...pendingAttendanceStatus };
+  event.currentTarget.disabled = true;
+  try {
+    await registerAttendanceEvent(pending.recordId, pending.attendanceEvent);
+    closeAttendanceStatusModal();
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    event.currentTarget.disabled = false;
+  }
+});
+
 document.addEventListener("click", async event => {
   const nav = event.target.closest("[data-view]");
   if (nav) switchView(nav.dataset.view);
 
   const attendanceEvent = event.target.closest("[data-attendance-event]");
   if (attendanceEvent) {
+    const eventType = attendanceEvent.dataset.attendanceEvent;
+    if (["ABSENT", "PERMISSION"].includes(eventType)) {
+      openAttendanceStatusModal(attendanceEvent.dataset.recordId, eventType);
+      return;
+    }
     attendanceEvent.disabled = true;
     try {
-      const response = await fetch(`${API_BASE_URL}/attendance/${attendanceEvent.dataset.recordId}/event`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ event: attendanceEvent.dataset.attendanceEvent })
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.detail || "No fue posible registrar la asistencia");
-      await loadAttendanceFromApi();
-      renderAttendance();
-      showToast("Asistencia actualizada");
+      await registerAttendanceEvent(attendanceEvent.dataset.recordId, eventType);
     } catch (error) {
       showToast(error.message);
     } finally {
@@ -1871,12 +2030,9 @@ document.addEventListener("click", async event => {
     renderCart();
   }
 
-  const birthdayDiscount = event.target.closest("[data-birthday-discount]");
+  const birthdayDiscount = event.target.closest("[data-birthday-sale-discount]");
   if (birthdayDiscount) {
-    const serviceId = birthdayDiscount.dataset.birthdayDiscount;
-    birthdayDiscountServiceId = String(birthdayDiscountServiceId) === serviceId
-      ? null
-      : serviceId;
+    birthdayDiscountServiceId = birthdayDiscountServiceId === "ALL" ? null : "ALL";
     renderCart();
   }
 
@@ -2124,6 +2280,45 @@ $("#cancelServiceEdit").addEventListener("click", resetServiceForm);
 $("#cancelAppointmentEdit").addEventListener("click", resetAppointmentForm);
 $("#cancelBarberEdit").addEventListener("click", resetBarberForm);
 $("#cancelReceptionistEdit").addEventListener("click", resetReceptionistForm);
+$("#cancelUserEdit").addEventListener("click", resetUserForm);
+
+$("#userList").addEventListener("click", async event => {
+  const editButton = event.target.closest("[data-edit-user]");
+  if (editButton) {
+    const user = systemUsers.find(item => String(item.id) === editButton.dataset.editUser);
+    if (!user) return;
+    const form = $("#userForm");
+    form.userId.value = user.id;
+    form.fullName.value = user.full_name;
+    form.username.value = user.username;
+    form.role.value = user.role;
+    form.password.value = "";
+    form.password.required = false;
+    $("#userFormTitle").textContent = "Editar cuenta";
+    $("#userSubmitLabel").textContent = "Guardar cambios";
+    $("#userPasswordHelp").textContent = "Déjala vacía para conservar la contraseña actual.";
+    $("#cancelUserEdit").classList.remove("hidden");
+    form.scrollIntoView({ behavior: "smooth", block: "center" });
+    form.fullName.focus();
+    return;
+  }
+
+  const toggleButton = event.target.closest("[data-toggle-user]");
+  if (!toggleButton || toggleButton.disabled) return;
+  const user = systemUsers.find(item => String(item.id) === toggleButton.dataset.toggleUser);
+  if (!user) return;
+  if (user.active && !window.confirm(`¿Desactivar la cuenta de "${user.full_name}"?`)) return;
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/${user.id}/active`, { method: "PATCH" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "No fue posible actualizar la cuenta");
+    await loadUsersFromApi();
+    renderUsers();
+    showToast(result.active ? "Cuenta activada" : "Cuenta desactivada");
+  } catch (error) {
+    showToast(error.message || "No fue posible actualizar la cuenta");
+  }
+});
 $("#cancelCustomerEdit").addEventListener("click", resetCustomerForm);
 
 function closeAppointmentConfirmationModal() {
@@ -2352,6 +2547,13 @@ document.querySelectorAll('input[name="birthDate"]').forEach(input => {
 
 $("#scheduleForm").weekStart.addEventListener("change", renderWeeklySchedule);
 $("#scheduleForm").shiftType.addEventListener("change", renderWeeklySchedule);
+$("#savedSchedulesPanel").addEventListener("click", event => {
+  const button = event.target.closest("[data-view-saved-schedule]");
+  if (!button) return;
+  $("#scheduleForm").shiftType.value = button.dataset.viewSavedSchedule;
+  renderWeeklySchedule();
+  $("#scheduleForm").scrollIntoView({ behavior: "smooth", block: "start" });
+});
 $("#schedulePeopleOptions").addEventListener("change", event => {
   if (!event.target.matches('input[type="checkbox"]')) return;
   captureVisibleScheduleDraft();
@@ -2478,7 +2680,11 @@ $("#scheduleForm").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.currentTarget;
   try {
-    if (!selectedSchedulePeople.size) throw new Error("Selecciona al menos una persona para este turno");
+    const selectedKeys = new Set(
+      [...$("#schedulePeopleOptions").querySelectorAll('input[type="checkbox"]:checked')]
+        .map(input => input.value)
+    );
+    if (!selectedKeys.size) throw new Error("Selecciona al menos una persona para este turno");
     const schedules = [...form.querySelectorAll("[data-schedule-cell]")].flatMap(cell => {
     const resting = cell.querySelector("[data-schedule-rest]").checked;
     const value = field => cell.querySelector(`[data-field="${field}"]`).value || null;
@@ -2499,14 +2705,15 @@ $("#scheduleForm").addEventListener("submit", async event => {
       meal_end: resting ? null : value("meal_end")
     }];
   });
+    const peopleWithSchedule = new Set(schedules.map(item => schedulePersonKey(item.person_type, item.person_id)));
+    if ([...selectedKeys].some(key => !peopleWithSchedule.has(key))) {
+      throw new Error("Cada persona seleccionada necesita al menos un día de trabajo o descanso");
+    }
+    selectedSchedulePeople = selectedKeys;
     const payload = { week_start: form.weekStart.value, shift_type: form.shiftType.value, schedules };
     const response = await fetch(`${API_BASE_URL}/attendance/schedules/week`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
     });
-    const peopleWithSchedule = new Set(schedules.map(item => schedulePersonKey(item.person_type, item.person_id)));
-    if ([...selectedSchedulePeople].some(key => !peopleWithSchedule.has(key))) {
-      throw new Error("Cada persona seleccionada necesita al menos un día de trabajo o descanso");
-    }
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.detail || "No fue posible guardar el horario");
     workSchedules = workSchedules.filter(item => !(
@@ -2551,6 +2758,8 @@ $("#attendanceCorrectionForm").addEventListener("submit", async event => {
     showToast(error.message);
   }
 });
+
+$("#openShiftForm").shiftType.addEventListener("change", applyScheduledStaffToOpenShift);
 
 $("#openShiftForm").addEventListener("submit", async event => {
   event.preventDefault();
@@ -2629,6 +2838,14 @@ $("#shiftEvidenceForm").addEventListener("submit", async event => {
   event.preventDefault();
   if (!currentShift) return;
   const form = event.currentTarget;
+  const closeForm = $("#closeShiftForm");
+  const closeDraft = {
+    cashSalesCounted: closeForm.cashSalesCounted.value,
+    cardReported: closeForm.cardReported.value,
+    transferReported: closeForm.transferReported.value,
+    closingNotes: closeForm.closingNotes.value
+  };
+  const previousScrollPosition = window.scrollY;
   const file = form.evidence.files[0];
   if (!file) return showToast("Selecciona una imagen del checador");
   const button = form.querySelector('button[type="submit"]');
@@ -2646,7 +2863,14 @@ $("#shiftEvidenceForm").addEventListener("submit", async event => {
     form.reset();
     $("#shiftEvidenceFileName").textContent = "Ninguna imagen seleccionada";
     $("#removeSelectedEvidence").classList.add("hidden");
-    renderAll();
+    renderShift();
+    closeForm.cashSalesCounted.value = closeDraft.cashSalesCounted;
+    closeForm.cardReported.value = closeDraft.cardReported;
+    closeForm.transferReported.value = closeDraft.transferReported;
+    closeForm.closingNotes.value = closeDraft.closingNotes;
+    renderShift();
+    switchView("shift");
+    window.scrollTo({ top: previousScrollPosition, behavior: "instant" });
     showToast("Evidencia del checador guardada");
   } catch (error) {
     console.error(error);
@@ -2894,6 +3118,39 @@ $("#receptionistForm").addEventListener("submit", async event => {
   }
 });
 
+$("#userForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const userId = form.userId.value;
+  const payload = {
+    full_name: form.fullName.value.trim(),
+    username: form.username.value.trim(),
+    role: form.role.value,
+    password: form.password.value || (userId ? null : "")
+  };
+  try {
+    const response = await fetch(userId ? `${API_BASE_URL}/users/${userId}` : `${API_BASE_URL}/users`, {
+      method: userId ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "No fue posible guardar la cuenta");
+    if (String(result.id) === String(authenticatedUser?.id)) {
+      authenticatedUser = { ...authenticatedUser, ...result };
+      $("#sessionUserName").textContent = result.full_name;
+    }
+    resetUserForm();
+    await loadUsersFromApi();
+    renderUsers();
+    showToast(userId ? "Cuenta actualizada" : "Cuenta creada");
+  } catch (error) {
+    console.error(error);
+    const detail = Array.isArray(error.message) ? "Revisa los datos de la cuenta" : error.message;
+    showToast(detail || "No fue posible guardar la cuenta");
+  }
+});
+
 $("#customerForm").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.currentTarget;
@@ -2961,9 +3218,8 @@ $("#saleForm").addEventListener("submit", async event => {
         shift_id: Number(currentShift.id),
         receipt_number: Number(form.receiptNumber.value),
         discount: birthdayDiscount,
-        birthday_service_id: birthdayDiscountServiceId
-          ? Number(birthdayDiscountServiceId)
-          : null,
+        birthday_discount: birthdayDiscountServiceId === "ALL",
+        birthday_service_id: null,
         items: [...itemQuantities].map(([serviceId, quantity]) => ({
           service_id: Number(serviceId),
           quantity
@@ -3034,6 +3290,7 @@ async function initialize() {
   $("#salesDateFrom").value = currentWeekStartISO();
   $("#salesDateTo").value = todayISO();
   renderAll();
+  switchView(sessionStorage.getItem(ACTIVE_VIEW_KEY) || "appointments");
 
   try {
     const authResponse = await fetch(`${API_BASE_URL}/auth/me`);

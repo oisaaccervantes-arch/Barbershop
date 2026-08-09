@@ -32,6 +32,7 @@ class SaleCreate(BaseModel):
     shift_id: int
     receipt_number: int = Field(ge=0, le=10_000)
     discount: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=2)
+    birthday_discount: bool = False
     birthday_service_id: int | None = None
     items: list[SaleItemCreate] = Field(min_length=1)
     payments: list[PaymentCreate] = Field(min_length=1)

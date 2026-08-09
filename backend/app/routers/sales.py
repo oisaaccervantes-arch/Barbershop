@@ -1,5 +1,5 @@
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
@@ -196,7 +196,17 @@ def create_sale(payload: SaleCreate, db: DatabaseSession):
     subtotal = subtotal.quantize(MONEY_UNIT)
     discount = payload.discount.quantize(MONEY_UNIT)
     discount_reason = None
-    if payload.birthday_service_id is not None:
+    if payload.birthday_discount:
+        if customer is None or customer.birth_date is None:
+            raise HTTPException(status_code=400, detail="El cliente no tiene fecha de nacimiento")
+        today = datetime.now(ZoneInfo("America/Hermosillo")).date()
+        if (customer.birth_date.month, customer.birth_date.day) != (today.month, today.day):
+            raise HTTPException(status_code=400, detail="El cliente no cumple años hoy")
+        expected_discount = (subtotal / 2).quantize(MONEY_UNIT, rounding=ROUND_HALF_UP)
+        if discount != expected_discount:
+            raise HTTPException(status_code=400, detail="El descuento de cumpleaños no es válido")
+        discount_reason = "BIRTHDAY"
+    elif payload.birthday_service_id is not None:
         if customer is None or customer.birth_date is None:
             raise HTTPException(status_code=400, detail="El cliente no tiene fecha de nacimiento")
         today = datetime.now(ZoneInfo("America/Hermosillo")).date()

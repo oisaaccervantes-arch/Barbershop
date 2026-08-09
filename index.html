@@ -263,7 +263,8 @@
           </label>
           <div class="birthday-notice hidden" id="birthdayNotice">
             <strong>🎂 Cumpleaños del cliente</strong>
-            <span>Hoy puede recibir 50 % en un servicio. Elige “Aplicar 50 %” en el servicio correspondiente.</span>
+            <span>Hoy puede recibir 50 % en todos los servicios de esta venta.</span>
+            <button class="chip-button pay" id="birthdaySaleDiscount" type="button" data-birthday-sale-discount>Aplicar 50 % a toda la venta</button>
           </div>
           <label>Barbero
             <select name="barber" required></select>
@@ -422,6 +423,34 @@
             </div>
           </div>
           <div class="price-list" id="receptionistList"></div>
+        </div>
+      </div>
+      <div class="workspace two-columns" data-admin-only>
+        <form class="panel form-panel" id="userForm">
+          <div class="panel-header">
+            <div><p class="eyebrow">Acceso al sistema</p><h3 id="userFormTitle">Crear cuenta</h3></div>
+          </div>
+          <input name="userId" type="hidden">
+          <label>Nombre para mostrar
+            <input name="fullName" maxlength="120" placeholder="Ej. Gabriela" required>
+          </label>
+          <label>Usuario
+            <input name="username" maxlength="80" autocomplete="off" placeholder="Ej. gabriela" required>
+          </label>
+          <label>Tipo de cuenta
+            <select name="role" required><option value="RECEPTION">Recepcionista</option><option value="ADMIN">Administradora</option></select>
+          </label>
+          <label>Contraseña
+            <input name="password" type="password" minlength="8" maxlength="128" autocomplete="new-password" placeholder="Mínimo 8 caracteres">
+            <small id="userPasswordHelp">Obligatoria para una cuenta nueva.</small>
+          </label>
+          <button class="submit-button" type="submit"><span class="material-symbols-outlined">person_add</span><span id="userSubmitLabel">Crear cuenta</span></button>
+          <button class="secondary-button hidden" id="cancelUserEdit" type="button">Cancelar edición</button>
+        </form>
+        <div class="panel">
+          <div class="panel-header"><div><p class="eyebrow">Seguridad</p><h3>Cuentas registradas</h3></div></div>
+          <p class="muted">Las contraseñas nunca se muestran. Puedes asignar una nueva al editar la cuenta.</p>
+          <div class="price-list" id="userList"></div>
         </div>
       </div>
     </section>
@@ -609,6 +638,20 @@
           <button class="submit-button" type="submit">Guardar semana completa</button>
         </form>
 
+        <div class="panel full-panel hidden" id="savedSchedulesPanel" data-admin-only>
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Horarios guardados</p>
+              <h3>Semana configurada</h3>
+              <p class="muted" id="savedSchedulesWeekLabel"></p>
+            </div>
+          </div>
+          <div class="saved-schedule-sections">
+            <article class="saved-schedule-card" id="savedScheduleMorning"></article>
+            <article class="saved-schedule-card" id="savedScheduleEvening"></article>
+          </div>
+        </div>
+
         <div class="panel full-panel">
           <div class="panel-header"><div><p class="eyebrow">Historial</p><h3>Asistencias por semana</h3><p class="muted">Despliega una semana para comparar el horario programado con las horas registradas.</p></div></div>
           <div class="attendance-history-groups" id="attendanceHistoryGroups"></div>
@@ -647,6 +690,7 @@
             <legend>Barberos que trabajarán</legend>
             <div class="barber-checklist" id="shiftBarberOptions"></div>
           </fieldset>
+          <p class="muted shift-schedule-status" id="shiftScheduleStatus"></p>
           <button class="submit-button" type="submit">
             <span class="material-symbols-outlined">point_of_sale</span>
             Abrir turno
@@ -696,6 +740,7 @@
             </section>
             <form class="cut-card" id="closeShiftForm">
               <p class="eyebrow">Conteo real</p>
+              <div class="schedule-help" id="closeShiftEvidenceNotice">Primero adjunta la foto del checador para capturar el corte.</div>
               <label>Fondo que permanece en caja
                 <input name="fundReserved" type="number" min="0" step="0.01" value="0" readonly>
                 <small>Se toma automáticamente del fondo registrado al abrir el turno.</small>
@@ -830,6 +875,20 @@
     </div>
   </div>
 
+  <div class="modal-backdrop hidden" id="attendanceStatusModal">
+    <div class="modal-card">
+      <div class="panel-header">
+        <div><p class="eyebrow">Confirmar asistencia</p><h3 id="attendanceStatusTitle">Confirmar estado</h3></div>
+        <button class="icon-button" id="closeAttendanceStatus" type="button" title="Cerrar"><span class="material-symbols-outlined">close</span></button>
+      </div>
+      <p id="attendanceStatusMessage"></p>
+      <div class="modal-actions">
+        <button class="secondary-button" id="cancelAttendanceStatus" type="button">Cancelar</button>
+        <button class="submit-button danger-button" id="confirmAttendanceStatus" type="button">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop hidden" id="closeShiftModal">
     <div class="modal-card">
       <div class="panel-header">
@@ -958,40 +1017,25 @@
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
-      <p>Consulta el paso que necesites. Para trabajar el día completo sigue el orden del 1 al 7.</p>
+      <p>Consulta el paso que necesites. Las opciones administrativas solamente aparecen en la cuenta de la dueña.</p>
+      <section class="help-role-section" data-admin-only>
+        <p class="eyebrow">Funciones de administradora</p>
+        <div class="help-admin-grid">
+          <div><strong>Personal y cuentas</strong><span>En <b>Personal</b> administra barberos, recepcionistas y cuentas de acceso. Al editar una cuenta, deja la contraseña vacía para conservarla o escribe una nueva para restablecerla.</span></div>
+          <div><strong>Horarios semanales</strong><span>En <b>Checador</b> selecciona semana y turno, elige el personal, captura horarios o descansos y guarda la semana completa. También puedes copiar horarios y exportarlos a Excel.</span></div>
+          <div><strong>Correcciones</strong><span>La administradora puede corregir asistencias y consultar quién realizó el último registro. Las recepcionistas no pueden modificar horarios ni corregir registros anteriores.</span></div>
+        </div>
+      </section>
+      <p class="eyebrow help-flow-title">Operación diaria de recepción</p>
       <div class="help-steps">
-        <details open>
-          <summary><span>1</span> Preparar personal y servicios</summary>
-          <p>En <strong>Personal</strong>, edita o registra barberos y recepcionistas. En <strong>Catálogo</strong>, revisa nombres y precios. Desactiva registros que ya no deban utilizarse.</p>
-        </details>
-        <details>
-          <summary><span>2</span> Abrir el turno</summary>
-          <p>En <strong>Corte de turno</strong>, selecciona turno, fondo inicial, folio, recepcionista y barberos que trabajarán. El folio se sugiere automáticamente, pero puede modificarse.</p>
-        </details>
-        <details>
-          <summary><span>3</span> Agendar una cita</summary>
-          <p>Captura teléfono, cliente, fecha y hora. El barbero y los servicios pueden quedar sin asignar. Si el teléfono ya existe, el nombre del cliente se completará automáticamente.</p>
-        </details>
-        <details>
-          <summary><span>4</span> Confirmar una cita</summary>
-          <p>Presiona <strong>Confirmar</strong>. Si faltan datos, selecciona el barbero y uno o varios servicios. El sistema evitará choques de horario para el mismo barbero.</p>
-        </details>
-        <details>
-          <summary><span>5</span> Realizar un cobro</summary>
-          <p>Para una cita usa <strong>Cobrar</strong>; los servicios se cargarán en Caja. Para clientes sin cita entra directamente a <strong>Caja</strong>. Selecciona barbero, servicios y método de pago antes de cobrar.</p>
-        </details>
-        <details>
-          <summary><span>6</span> Revisar ventas y cancelaciones</summary>
-          <p>En <strong>Ventas</strong> filtra por fechas o barbero, consulta gráficas y revisa movimientos. Las cancelaciones conservan su motivo para seguimiento.</p>
-        </details>
-        <details>
-          <summary><span>7</span> Cerrar el turno</summary>
-          <p>En <strong>Corte de turno</strong>, registra gastos, efectivo contado, corte de terminal, transferencias verificadas y notas opcionales. Descarga desde WhatsApp Web la foto del checador y adjúntala como evidencia obligatoria. Revisa las diferencias antes de cerrar definitivamente.</p>
-        </details>
-        <details>
-          <summary><span>8</span> Consultar información anterior</summary>
-          <p>Usa el historial de citas, Ventas y los turnos anteriores para consultar folios, servicios, producción por barbero, gastos y diferencias de caja.</p>
-        </details>
+        <details open><summary><span>1</span> Abrir el turno</summary><p>En <strong>Corte de turno</strong>, selecciona turno, fondo inicial, folio, recepcionista responsable y barberos que trabajarán. El folio sugerido puede modificarse antes de abrir.</p></details>
+        <details><summary><span>2</span> Registrar asistencias</summary><p>En <strong>Checador</strong>, registra entrada, salida y comida del personal. También puedes marcar falta o permiso. El sistema guarda qué cuenta realizó el registro y no permitirá cerrar mientras falten entradas o salidas.</p></details>
+        <details><summary><span>3</span> Agendar y confirmar citas</summary><p>Captura teléfono, nombre, fecha y hora. El barbero y los servicios pueden quedar pendientes. Al confirmar, completa esos datos; se permiten varios servicios y se evitan citas simultáneas para el mismo barbero.</p></details>
+        <details><summary><span>4</span> Cobrar servicios</summary><p>Desde una cita usa <strong>Cobrar</strong>, o entra directamente a <strong>Caja</strong> para una venta sin cita. Selecciona cliente opcional, barbero, servicios y método de pago. Si hoy es el cumpleaños registrado del cliente, puedes activar 50 % de descuento sobre todos los servicios de la venta. Verifica el folio antes de confirmar.</p></details>
+        <details><summary><span>5</span> Registrar gastos y revisar ventas</summary><p>Los gastos del turno se capturan en <strong>Corte de turno</strong>. En <strong>Ventas</strong> puedes filtrar por fechas o barbero, consultar gráficas, movimientos, neto después de gastos y motivos de cancelación.</p></details>
+        <details><summary><span>6</span> Adjuntar evidencia del checador</summary><p>Descarga desde WhatsApp Web la fotografía del checador. En <strong>Corte de turno</strong>, elige la imagen y presiona <strong>Subir evidencia</strong>. Comprueba la miniatura; puedes reemplazarla mientras el turno esté abierto.</p></details>
+        <details><summary><span>7</span> Cerrar el turno</summary><p>Registra efectivo entregado, corte de terminal, transferencias verificadas y notas opcionales. Revisa las diferencias. Para cerrar son obligatorias la evidencia y las asistencias completas. El sistema guarda quién subió la foto y quién cerró.</p></details>
+        <details><summary><span>8</span> Consultar y exportar historial</summary><p>En turnos anteriores abre <strong>Ver desglose</strong> para consultar conciliación, gastos, producción, evidencia y responsables. En <strong>Checador</strong> puedes revisar asistencias por semana y exportarlas a Excel.</p></details>
       </div>
       <div class="modal-actions">
         <button class="submit-button" id="finishHelp" type="button">Entendido</button>
