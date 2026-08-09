@@ -62,6 +62,15 @@ async def require_authenticated_session(request: Request, call_next):
         if user is None or not user.active:
             return JSONResponse(status_code=401, content={"detail": "Sesión inválida"})
         request.state.user = user
+        if (
+            user.role == "SUPPORT"
+            and request.method not in {"GET", "HEAD", "OPTIONS"}
+            and request.url.path != "/api/auth/logout"
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "La cuenta de soporte tiene acceso de consulta únicamente"},
+            )
         response = await call_next(request)
     return response
 

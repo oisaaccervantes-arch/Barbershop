@@ -10,11 +10,11 @@ from app.security import hash_password
 def main() -> None:
     username = input("Usuario: ").strip().lower()
     full_name = input("Nombre para mostrar: ").strip()
-    role = input("Rol [ADMIN/RECEPTION] (ADMIN): ").strip().upper() or "ADMIN"
+    role = input("Rol [ADMIN/RECEPTION/SUPPORT] (ADMIN): ").strip().upper() or "ADMIN"
     if not username or not full_name:
         raise SystemExit("El usuario y el nombre son obligatorios")
-    if role not in {"ADMIN", "RECEPTION"}:
-        raise SystemExit("El rol debe ser ADMIN o RECEPTION")
+    if role not in {"ADMIN", "RECEPTION", "SUPPORT"}:
+        raise SystemExit("El rol debe ser ADMIN, RECEPTION o SUPPORT")
     password = getpass("Contraseña (mínimo 8 caracteres): ")
     confirmation = getpass("Repite la contraseña: ")
     if len(password) < 8 or len(password) > 128:

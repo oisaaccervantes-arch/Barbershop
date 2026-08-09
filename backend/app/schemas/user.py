@@ -21,7 +21,7 @@ class UserCreate(BaseModel):
     @classmethod
     def validate_role(cls, value: str) -> str:
         value = value.strip().upper()
-        if value not in {"ADMIN", "RECEPTION"}:
+        if value not in {"ADMIN", "RECEPTION", "SUPPORT"}:
             raise ValueError("Rol no válido")
         return value
 

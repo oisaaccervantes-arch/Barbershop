@@ -624,6 +624,12 @@ const getCartSubtotal = () => roundMoney(
 const getBirthdayDiscount = () => {
   return birthdayDiscountServiceId === "ALL" ? roundMoney(getCartSubtotal() / 2) : 0;
 };
+
+const userRoleLabels = {
+  ADMIN: "Administradora",
+  RECEPTION: "Recepcionista",
+  SUPPORT: "Soporte · solo consulta"
+};
 const getCartTotal = () => roundMoney(getCartSubtotal() - getBirthdayDiscount());
 
 function updatePaymentFields() {
@@ -768,6 +774,7 @@ function checkedServiceIds(containerId) {
 
 function showLogin(message = "") {
   authenticatedUser = null;
+  document.body.classList.remove("support-mode");
   $("#loginScreen").classList.remove("hidden");
   $("#loginError").textContent = message;
   $("#loginError").classList.toggle("hidden", !message);
@@ -776,7 +783,8 @@ function showLogin(message = "") {
 
 function showApplication(user) {
   authenticatedUser = user;
-  $("#sessionUserName").textContent = user.full_name;
+  $("#sessionUserName").textContent = `${user.full_name} · ${userRoleLabels[user.role] || user.role}`;
+  document.body.classList.toggle("support-mode", user.role === "SUPPORT");
   document.querySelectorAll("[data-admin-only]").forEach(element =>
     element.classList.toggle("hidden", user.role !== "ADMIN")
   );
@@ -962,7 +970,7 @@ function renderUsers() {
     <div class="price-item ${user.active ? "" : "inactive"}">
       <div>
         <strong>${escapeHtml(user.full_name)}</strong>
-        <span>@${escapeHtml(user.username)} · ${user.role === "ADMIN" ? "Administradora" : "Recepcionista"} · ${user.active ? "Activa" : "Inactiva"}</span>
+        <span>@${escapeHtml(user.username)} · ${userRoleLabels[user.role] || user.role} · ${user.active ? "Activa" : "Inactiva"}</span>
       </div>
       <div class="catalog-actions">
         <button class="chip-button" type="button" data-edit-user="${user.id}">Editar</button>
