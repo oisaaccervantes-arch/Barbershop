@@ -15,6 +15,7 @@ from app.routers.cash_shifts import router as cash_shifts_router
 from app.routers.sales import router as sales_router
 from app.routers.services import router as services_router
 from app.routers.receptionists import router as receptionists_router
+from app.routers.attendance import router as attendance_router
 from pathlib import Path
 
 
@@ -41,6 +42,7 @@ app.include_router(sales_router)
 app.include_router(services_router)
 app.include_router(receptionists_router)
 app.include_router(auth_router)
+app.include_router(attendance_router)
 
 
 PUBLIC_API_PATHS = {"/api/auth/login", "/api/health", "/api/health/database"}

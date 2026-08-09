@@ -63,6 +63,11 @@ class CashShiftRead(BaseModel):
     card_reported: Decimal | None
     transfer_reported: Decimal | None
     closing_notes: str | None
+    evidence_original_name: str | None
+    evidence_uploaded_at: datetime | None
+    evidence_uploaded_by_name: str | None
+    closed_by_name: str | None
+    evidence_url: str | None
     next_receipt_number: int
     barbers: list[ShiftBarberRead]
     expenses: list[ShiftExpenseRead]

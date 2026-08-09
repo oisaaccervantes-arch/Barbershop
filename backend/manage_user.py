@@ -10,8 +10,11 @@ from app.security import hash_password
 def main() -> None:
     username = input("Usuario: ").strip().lower()
     full_name = input("Nombre para mostrar: ").strip()
+    role = input("Rol [ADMIN/RECEPTION] (ADMIN): ").strip().upper() or "ADMIN"
     if not username or not full_name:
         raise SystemExit("El usuario y el nombre son obligatorios")
+    if role not in {"ADMIN", "RECEPTION"}:
+        raise SystemExit("El rol debe ser ADMIN o RECEPTION")
     password = getpass("Contraseña (mínimo 8 caracteres): ")
     confirmation = getpass("Repite la contraseña: ")
     if len(password) < 8 or len(password) > 128:
@@ -21,12 +24,13 @@ def main() -> None:
     with SessionLocal() as db:
         user = db.scalar(select(User).where(func.lower(User.username) == username))
         if user is None:
-            user = User(username=username, full_name=full_name, password_hash=hash_password(password))
+            user = User(username=username, full_name=full_name, password_hash=hash_password(password), role=role)
             db.add(user)
             action = "creado"
         else:
             user.full_name = full_name
             user.password_hash = hash_password(password)
+            user.role = role
             user.active = True
             action = "actualizado"
         db.commit()

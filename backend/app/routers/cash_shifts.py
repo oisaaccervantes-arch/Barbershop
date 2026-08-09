@@ -1,8 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Annotated
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -11,6 +14,7 @@ from app.models.barber import Barber
 from app.models.cash_shift import CashShift, ShiftBarber, ShiftExpense
 from app.models.sale import Sale
 from app.models.receptionist import Receptionist
+from app.models.attendance import AttendanceRecord, WorkSchedule
 from app.schemas.cash_shift import CashShiftClose, CashShiftCreate, CashShiftRead, ShiftExpenseCreate, ShiftExpenseRead
 
 
@@ -18,6 +22,13 @@ router = APIRouter(prefix="/api/shifts", tags=["shifts"])
 DatabaseSession = Annotated[Session, Depends(get_db)]
 LOCAL_ZONE = ZoneInfo("America/Hermosillo")
 MAX_RECEIPT_NUMBER = 10_000
+EVIDENCE_DIR = Path(__file__).resolve().parents[2] / "uploads" / "shift_evidence"
+MAX_EVIDENCE_BYTES = 8 * 1024 * 1024
+ALLOWED_EVIDENCE_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
 
 
 def next_global_receipt_number(db: Session) -> int | None:
@@ -51,6 +62,8 @@ def shift_query():
     return select(CashShift).options(
         joinedload(CashShift.barbers).joinedload(ShiftBarber.barber),
         joinedload(CashShift.receptionist),
+        joinedload(CashShift.evidence_uploaded_by),
+        joinedload(CashShift.closed_by),
         selectinload(CashShift.expenses),
     )
 
@@ -73,6 +86,11 @@ def serialize_shift(shift: CashShift, db: Session) -> dict:
         "card_reported": shift.card_reported,
         "transfer_reported": shift.transfer_reported,
         "closing_notes": shift.closing_notes,
+        "evidence_original_name": shift.evidence_original_name,
+        "evidence_uploaded_at": shift.evidence_uploaded_at,
+        "evidence_uploaded_by_name": shift.evidence_uploaded_by.full_name if shift.evidence_uploaded_by else None,
+        "closed_by_name": shift.closed_by.full_name if shift.closed_by else None,
+        "evidence_url": f"/api/shifts/{shift.id}/evidence" if shift.evidence_file_name else None,
         "next_receipt_number": next_receipt_number(db, shift),
         "barbers": [{"id": row.barber.id, "name": row.barber.name} for row in shift.barbers],
         "expenses": [
@@ -80,6 +98,29 @@ def serialize_shift(shift: CashShift, db: Session) -> dict:
             for expense in shift.expenses
         ],
     }
+
+
+def schedule_for(db: Session, person_type: str, person_id: int, shift: CashShift):
+    return db.scalar(select(WorkSchedule).where(
+        WorkSchedule.person_type == person_type,
+        WorkSchedule.person_id == person_id,
+        WorkSchedule.week_start == shift.business_date - timedelta(days=shift.business_date.weekday()),
+        WorkSchedule.day_of_week == shift.business_date.weekday(),
+        WorkSchedule.shift_type == shift.shift_type,
+    ))
+
+
+def attendance_record(db: Session, shift: CashShift, person_type: str, employee):
+    schedule = schedule_for(db, person_type, employee.id, shift)
+    return AttendanceRecord(
+        shift=shift,
+        person_type=person_type,
+        person_id=employee.id,
+        person_name=employee.name,
+        scheduled_start=schedule.start_time if schedule and schedule.status == "WORK" else None,
+        scheduled_end=schedule.end_time if schedule and schedule.status == "WORK" else None,
+        status="REST" if schedule and schedule.status == "REST" else "PENDING",
+    )
 
 
 @router.get("/current", response_model=CashShiftRead | None)
@@ -122,6 +163,10 @@ def open_shift(payload: CashShiftCreate, db: DatabaseSession):
         receptionist_id=receptionist.id,
         barbers=[ShiftBarber(barber_id=barber.id) for barber in barbers],
     )
+    shift.attendance_records = [
+        attendance_record(db, shift, "RECEPTIONIST", receptionist),
+        *[attendance_record(db, shift, "BARBER", barber) for barber in barbers],
+    ]
     db.add(shift)
     db.commit()
     saved = db.scalar(shift_query().where(CashShift.id == shift.id))
@@ -141,15 +186,89 @@ def add_expense(shift_id: int, payload: ShiftExpenseCreate, db: DatabaseSession)
     return expense
 
 
-@router.post("/{shift_id}/close", response_model=CashShiftRead)
-def close_shift(shift_id: int, payload: CashShiftClose, db: DatabaseSession):
+@router.post("/{shift_id}/evidence", response_model=CashShiftRead)
+def upload_shift_evidence(
+    shift_id: int,
+    evidence: Annotated[UploadFile, File(...)],
+    request: Request,
+    db: DatabaseSession,
+):
     shift = db.get(CashShift, shift_id)
     if shift is None or shift.status != "OPEN":
         raise HTTPException(status_code=400, detail="El turno no está abierto")
+    extension = ALLOWED_EVIDENCE_TYPES.get(evidence.content_type or "")
+    if extension is None:
+        raise HTTPException(status_code=400, detail="Selecciona una imagen JPG, PNG o WEBP")
+
+    content = evidence.file.read(MAX_EVIDENCE_BYTES + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="La imagen está vacía")
+    if len(content) > MAX_EVIDENCE_BYTES:
+        raise HTTPException(status_code=413, detail="La imagen no puede pesar más de 8 MB")
+
+    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+    previous_path = EVIDENCE_DIR / shift.evidence_file_name if shift.evidence_file_name else None
+    stored_name = f"shift_{shift.id}_{uuid4().hex}{extension}"
+    target = EVIDENCE_DIR / stored_name
+    target.write_bytes(content)
+
+    shift.evidence_file_name = stored_name
+    shift.evidence_original_name = Path(evidence.filename or "evidencia").name[:255]
+    shift.evidence_content_type = evidence.content_type
+    shift.evidence_uploaded_at = datetime.now(LOCAL_ZONE)
+    shift.evidence_uploaded_by_user_id = request.state.user.id
+    db.commit()
+    if previous_path and previous_path.is_file() and previous_path != target:
+        previous_path.unlink()
+    saved = db.scalar(shift_query().where(CashShift.id == shift.id))
+    return serialize_shift(saved, db)
+
+
+@router.get("/{shift_id}/evidence")
+def get_shift_evidence(shift_id: int, db: DatabaseSession):
+    shift = db.get(CashShift, shift_id)
+    if shift is None or not shift.evidence_file_name:
+        raise HTTPException(status_code=404, detail="Este turno no tiene evidencia")
+    path = EVIDENCE_DIR / shift.evidence_file_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No se encontró el archivo de evidencia")
+    return FileResponse(
+        path,
+        media_type=shift.evidence_content_type or "application/octet-stream",
+        filename=shift.evidence_original_name or path.name,
+        content_disposition_type="inline",
+    )
+
+
+@router.post("/{shift_id}/close", response_model=CashShiftRead)
+def close_shift(shift_id: int, payload: CashShiftClose, request: Request, db: DatabaseSession):
+    shift = db.scalar(
+        select(CashShift)
+        .options(selectinload(CashShift.attendance_records))
+        .where(CashShift.id == shift_id)
+    )
+    if shift is None or shift.status != "OPEN":
+        raise HTTPException(status_code=400, detail="El turno no está abierto")
+    if not shift.evidence_file_name:
+        raise HTTPException(
+            status_code=409,
+            detail="Adjunta la evidencia del checador antes de cerrar el turno",
+        )
+    incomplete = [
+        row.person_name for row in shift.attendance_records
+        if row.status not in {"ABSENT", "REST", "PERMISSION"}
+        and (row.clock_in is None or row.clock_out is None)
+    ]
+    if incomplete:
+        raise HTTPException(
+            status_code=409,
+            detail="Completa entrada y salida o registra una incidencia para: " + ", ".join(incomplete),
+        )
     shift.cash_counted = payload.cash_counted
     shift.card_reported = payload.card_reported
     shift.transfer_reported = payload.transfer_reported
     shift.closing_notes = " ".join(payload.closing_notes.split()) if payload.closing_notes else None
+    shift.closed_by_user_id = request.state.user.id
     shift.status = "CLOSED"
     shift.closed_at = datetime.now(LOCAL_ZONE)
     db.commit()

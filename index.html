@@ -79,6 +79,10 @@
         <span class="material-symbols-outlined"></span>
         Ventas
       </button>
+      <button class="nav-item" data-view="attendance">
+        <span class="material-symbols-outlined">schedule</span>
+        Checador
+      </button>
       <button class="nav-item" data-view="shift">
         <span class="material-symbols-outlined"></span>
         Corte de turno
@@ -259,7 +263,7 @@
           </label>
           <div class="birthday-notice hidden" id="birthdayNotice">
             <strong>🎂 Cumpleaños del cliente</strong>
-            <span>Puede aplicarse 50 % a un servicio.</span>
+            <span>Hoy puede recibir 50 % en un servicio. Elige “Aplicar 50 %” en el servicio correspondiente.</span>
           </div>
           <label>Barbero
             <select name="barber" required></select>
@@ -563,6 +567,55 @@
       </div>
     </section>
 
+    <section class="view" id="attendance">
+      <div class="workspace attendance-workspace">
+        <div class="panel full-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Asistencia</p>
+              <h3>Personal del turno actual</h3>
+              <p class="muted" id="attendanceShiftLabel">Abre un turno para comenzar a registrar.</p>
+            </div>
+          </div>
+          <div class="attendance-cards" id="attendanceCurrentRows"></div>
+        </div>
+
+        <form class="panel form-panel full-panel hidden" id="scheduleForm" data-admin-only>
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Administración</p>
+              <h3>Horario semanal del personal</h3>
+              <p class="muted">Selecciona la semana y captura toda la plantilla como en su hoja de Excel.</p>
+            </div>
+          </div>
+          <div class="schedule-toolbar">
+            <label>Semana que inicia<input name="weekStart" type="date" required></label>
+            <label>Turno
+              <select name="shiftType"><option value="MORNING">Matutino</option><option value="EVENING">Vespertino</option></select>
+            </label>
+            <button class="secondary-button" type="button" id="copyPreviousWeek">Copiar semana anterior</button>
+            <button class="secondary-button" type="button" id="exportScheduleExcel"><span class="material-symbols-outlined">download</span> Exportar Excel</button>
+          </div>
+          <fieldset class="schedule-people-picker">
+            <legend>Personal de este turno</legend>
+            <p class="muted">Selecciona únicamente quienes estarán en el turno elegido.</p>
+            <div class="schedule-people-options" id="schedulePeopleOptions"></div>
+          </fieldset>
+          <div class="schedule-help">En cada día captura entrada y salida. Activa <strong>Descanso</strong> cuando no trabaje. La comida es opcional.</div>
+          <div class="table-wrap weekly-schedule-wrap"><table class="weekly-schedule-table">
+            <thead><tr id="scheduleWeekHeader"></tr></thead>
+            <tbody id="scheduleRows"></tbody>
+          </table></div>
+          <button class="submit-button" type="submit">Guardar semana completa</button>
+        </form>
+
+        <div class="panel full-panel">
+          <div class="panel-header"><div><p class="eyebrow">Historial</p><h3>Asistencias por semana</h3><p class="muted">Despliega una semana para comparar el horario programado con las horas registradas.</p></div></div>
+          <div class="attendance-history-groups" id="attendanceHistoryGroups"></div>
+        </div>
+      </div>
+    </section>
+
     <section class="view" id="shift">
       <div class="workspace">
         <form class="panel form-panel" id="openShiftForm">
@@ -609,6 +662,33 @@
             <span class="shift-status" id="shiftStatus">Sin turno</span>
           </div>
 
+          <section class="cut-card shift-evidence-card">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Evidencia obligatoria</p>
+                <h3>Foto del checador</h3>
+                <p class="muted">Descarga la foto desde WhatsApp Web y adjúntala antes de cerrar el turno.</p>
+              </div>
+              <span class="shift-status" id="shiftEvidenceStatus">Pendiente</span>
+            </div>
+            <form class="shift-evidence-form" id="shiftEvidenceForm">
+              <label class="evidence-file-picker" for="shiftEvidenceInput">
+                <span class="evidence-picker-button"><span class="material-symbols-outlined">add_photo_alternate</span> Elegir imagen</span>
+                <span class="evidence-file-name" id="shiftEvidenceFileName">Ninguna imagen seleccionada</span>
+                <input id="shiftEvidenceInput" name="evidence" type="file" accept="image/jpeg,image/png,image/webp" required>
+              </label>
+              <button class="secondary-button evidence-remove-button hidden" id="removeSelectedEvidence" type="button">
+                <span class="material-symbols-outlined">close</span>
+                Quitar
+              </button>
+              <button class="secondary-button" type="submit">
+                <span class="material-symbols-outlined">upload</span>
+                Subir evidencia
+              </button>
+            </form>
+            <div class="shift-evidence-preview" id="shiftEvidencePreview"></div>
+          </section>
+
           <div class="reconciliation-grid">
             <section class="cut-card">
               <p class="eyebrow">Según el sistema</p>
@@ -652,7 +732,7 @@
             <section class="cut-card">
               <p class="eyebrow">Resultado</p>
               <div class="reconciliation-result" id="reconciliationResult"></div>
-              <button class="submit-button" form="closeShiftForm" type="submit">
+              <button class="submit-button" id="closeShiftButton" form="closeShiftForm" type="submit">
                 <span class="material-symbols-outlined">lock</span>
                 Cerrar turno
               </button>
@@ -712,6 +792,43 @@
       </div>
     </section>
   </main>
+
+  <div class="modal-backdrop hidden" id="repeatScheduleModal">
+    <form class="modal-card" id="repeatScheduleForm">
+      <div class="panel-header">
+        <div><p class="eyebrow">Horario semanal</p><h3>Repetir horario</h3></div>
+        <button class="icon-button" id="closeRepeatSchedule" type="button" title="Cerrar"><span class="material-symbols-outlined">close</span></button>
+      </div>
+      <p id="repeatScheduleDescription">Selecciona los días donde quieres usar el mismo horario.</p>
+      <div class="repeat-days-grid" id="repeatScheduleDays"></div>
+      <div class="modal-actions">
+        <button class="secondary-button" id="cancelRepeatSchedule" type="button">Cancelar</button>
+        <button class="submit-button" type="submit">Aplicar a los días</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="modal-backdrop hidden" id="attendanceCorrectionModal">
+    <div class="modal-card">
+      <div class="panel-header">
+        <div><p class="eyebrow">Administración</p><h3>Corregir asistencia</h3></div>
+        <button class="icon-button" id="closeAttendanceCorrection" type="button" title="Cerrar"><span class="material-symbols-outlined">close</span></button>
+      </div>
+      <form id="attendanceCorrectionForm">
+        <input name="recordId" type="hidden">
+        <p id="attendanceCorrectionName"></p>
+        <div class="form-grid">
+          <label>Entrada<input name="clockIn" type="datetime-local"></label>
+          <label>Salida a comida<input name="mealOut" type="datetime-local"></label>
+          <label>Regreso de comida<input name="mealIn" type="datetime-local"></label>
+          <label>Salida final<input name="clockOut" type="datetime-local"></label>
+          <label>Estado<select name="status"><option value="PENDING">Pendiente</option><option value="PRESENT">Asistió</option><option value="ABSENT">Falta</option><option value="REST">Descanso</option><option value="PERMISSION">Permiso</option></select></label>
+          <label>Notas<input name="notes" maxlength="500"></label>
+        </div>
+        <div class="modal-actions"><button class="secondary-button" id="cancelAttendanceCorrection" type="button">Cancelar</button><button class="submit-button" type="submit">Guardar corrección</button></div>
+      </form>
+    </div>
+  </div>
 
   <div class="modal-backdrop hidden" id="closeShiftModal">
     <div class="modal-card">
@@ -869,7 +986,7 @@
         </details>
         <details>
           <summary><span>7</span> Cerrar el turno</summary>
-          <p>En <strong>Corte de turno</strong>, registra gastos, efectivo contado, corte de terminal, transferencias verificadas y notas opcionales. Revisa las diferencias antes de cerrar definitivamente.</p>
+          <p>En <strong>Corte de turno</strong>, registra gastos, efectivo contado, corte de terminal, transferencias verificadas y notas opcionales. Descarga desde WhatsApp Web la foto del checador y adjúntala como evidencia obligatoria. Revisa las diferencias antes de cerrar definitivamente.</p>
         </details>
         <details>
           <summary><span>8</span> Consultar información anterior</summary>

@@ -239,6 +239,7 @@ textarea {
 .submit-button.compact {
   width: auto;
 }
+.secondary-button.compact { margin-top: 0; min-height: 36px; padding: 7px 11px; width: auto; }
 
 .icon-button {
   width: 40px;
@@ -600,7 +601,53 @@ td small { color: var(--muted); }
   margin-top: 18px;
 }
 
+#attendanceCorrectionForm .form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+#attendanceCorrectionForm .form-grid label,
+#attendanceCorrectionForm .form-grid input,
+#attendanceCorrectionForm .form-grid select {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
 .danger-button { background: #a52b1b; }
+
+.shift-evidence-card { margin: 18px 0; }
+.shift-evidence-card .panel-header { align-items: start; }
+.shift-status.complete { background: #d9f4e4; color: #16723a; }
+.shift-evidence-form { align-items: stretch; display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr) auto auto; margin-top: 14px; }
+.evidence-file-picker { align-items: center; background: var(--paper); border: 1px dashed #bda97f; border-radius: 9px; cursor: pointer; display: flex; gap: 12px; min-width: 0; padding: 9px; }
+.evidence-file-picker:hover { background: #fffaf0; border-color: var(--gold); }
+.evidence-file-picker input { height: 1px; opacity: 0; overflow: hidden; position: absolute; width: 1px; }
+.evidence-picker-button { align-items: center; background: var(--gold); border-radius: 7px; color: #20180f; display: inline-flex; flex: 0 0 auto; font-weight: 800; gap: 7px; padding: 9px 13px; }
+.evidence-picker-button .material-symbols-outlined { font-size: 21px; }
+.evidence-file-name { color: var(--muted); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evidence-remove-button { color: #a52b1b; }
+.shift-evidence-preview { margin-top: 14px; }
+.shift-evidence-preview > a { align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; color: inherit; display: flex; gap: 14px; padding: 10px; text-decoration: none; }
+.shift-evidence-preview img { border-radius: 7px; height: 90px; object-fit: cover; width: 120px; }
+.shift-evidence-preview span, .shift-evidence-preview small { display: block; }
+.shift-evidence-preview small { color: var(--muted); margin-top: 4px; }
+.evidence-history-link { align-items: center; color: #73530b; display: inline-flex; font-weight: 700; gap: 6px; }
+.evidence-history-card { align-items: center; background: var(--paper); border: 1px solid var(--line); border-radius: 9px; color: inherit; display: flex; gap: 12px; margin-top: 10px; padding: 9px; text-decoration: none; transition: border-color .15s ease, transform .15s ease; }
+.evidence-history-card:hover { border-color: var(--gold); transform: translateY(-1px); }
+.evidence-history-card > img { background: var(--surface); border-radius: 7px; height: 100px; object-fit: cover; width: 135px; }
+.evidence-history-card > span { min-width: 0; }
+.evidence-history-card strong, .evidence-history-card small, .evidence-history-card em { display: block; }
+.evidence-history-card small { color: var(--muted); font-weight: 500; margin-top: 4px; }
+.evidence-history-card em { align-items: center; color: #73530b; display: flex; font-style: normal; font-weight: 800; gap: 5px; margin-top: 10px; }
+.evidence-history-card em .material-symbols-outlined { font-size: 19px; }
+#closeShiftButton.requires-evidence { box-shadow: inset 0 0 0 2px #c79113; }
+
+@media (max-width: 720px) {
+  .shift-evidence-form { grid-template-columns: 1fr; }
+  .evidence-file-picker { align-items: stretch; flex-direction: column; }
+  .evidence-picker-button { justify-content: center; }
+}
 
 .close-shift-confirmation {
   margin-top: 16px;
@@ -998,6 +1045,85 @@ td small { color: var(--muted); }
 .help-steps summary span { align-items: center; background: var(--gold-soft); border-radius: 50%; display: inline-flex; height: 28px; justify-content: center; width: 28px; }
 .help-steps details p { color: var(--muted); line-height: 1.55; margin: 0 0 15px 38px; }
 
+.attendance-workspace { align-content: start; min-width: 0; }
+.full-panel { min-width: 0; width: 100%; }
+.schedule-toolbar { align-items: end; display: grid; gap: 14px; grid-template-columns: minmax(190px, 1fr) minmax(190px, 1fr) auto auto; margin-bottom: 14px; }
+.schedule-help { background: var(--gold-soft); border-radius: 8px; color: var(--muted); margin-bottom: 14px; padding: 11px 14px; }
+.schedule-people-picker { border: 1px solid var(--line); border-radius: 9px; margin: 0 0 14px; padding: 12px 14px 14px; }
+.schedule-people-picker legend { font-weight: 800; padding: 0 6px; }
+.schedule-people-picker p { margin: 0 0 10px; }
+.schedule-people-options { display: flex; flex-wrap: wrap; gap: 9px; }
+.schedule-person-option { align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; display: flex; gap: 8px; padding: 9px 12px; }
+.schedule-person-option:has(input:checked) { background: var(--gold-soft); border-color: #c79217; }
+.schedule-person-option input { height: 18px; margin: 0; width: 18px; }
+.schedule-person-option strong,
+.schedule-person-option small { display: block; }
+.schedule-person-option small { color: var(--muted); font-size: .72rem; margin-top: 2px; }
+.weekly-schedule-wrap { margin-bottom: 16px; max-width: 100%; overflow-x: auto; }
+.weekly-schedule-table { min-width: 1540px; table-layout: fixed; }
+.weekly-schedule-table th { vertical-align: top; }
+.weekly-schedule-table thead th { text-align: center; }
+.weekly-schedule-table thead th:first-child { text-align: left; width: 150px; }
+.weekly-schedule-table thead small, .schedule-person small { color: var(--muted); display: block; font-weight: 500; margin-top: 3px; }
+.schedule-person { background: var(--surface); left: 0; position: sticky; text-align: left; z-index: 2; }
+.schedule-day-cell { min-width: 190px; padding: 10px; vertical-align: top; }
+.schedule-rest { align-items: center; display: flex; font-size: .82rem; gap: 5px; margin-bottom: 8px; }
+.schedule-rest input { height: 17px; margin: 0; width: 17px; }
+.schedule-time-pair { display: grid; gap: 6px; grid-template-columns: 1fr 1fr; }
+.schedule-time-pair label { font-size: .72rem; }
+.schedule-time-pair input { font-size: .78rem; min-width: 0; padding: 7px 4px; width: 100%; }
+.schedule-repeat-button { background: transparent; border: 0; color: #76550a; cursor: pointer; font-size: .75rem; font-weight: 800; margin-top: 8px; padding: 3px 0; text-decoration: underline; }
+.repeat-days-grid { display: grid; gap: 9px; grid-template-columns: 1fr 1fr; margin-top: 16px; }
+.repeat-days-grid label { align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; display: flex; gap: 9px; padding: 11px; }
+.repeat-days-grid input { height: 18px; margin: 0; width: 18px; }
+.attendance-cards { display: grid; gap: 12px; }
+.attendance-card { background: var(--surface); border: 1px solid var(--line); border-left: 5px solid var(--gold); border-radius: 9px; padding: 15px; }
+.attendance-card.complete { border-left-color: #23804a; }
+.attendance-person { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
+.attendance-person strong, .attendance-person small { display: block; }
+.attendance-person small, .attendance-times small { color: var(--muted); }
+.attendance-times { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 14px 0; }
+.attendance-times span { background: var(--paper); border: 1px solid var(--line); border-radius: 7px; font-weight: 700; padding: 9px; }
+.attendance-times small { display: block; font-size: .72rem; margin-bottom: 3px; text-transform: uppercase; }
+.attendance-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.attendance-audit { color: var(--muted); font-size: .82rem; margin: 11px 0 0; }
+.attendance-history-groups { display: grid; gap: 11px; }
+.attendance-week { border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.attendance-week summary { align-items: center; background: var(--surface); cursor: pointer; display: flex; justify-content: space-between; list-style: none; padding: 14px 16px; }
+.attendance-week summary::-webkit-details-marker { display: none; }
+.attendance-week summary::after { content: "expand_more"; font-family: "Material Symbols Outlined"; font-size: 24px; }
+.attendance-week[open] summary::after { content: "expand_less"; }
+.attendance-week summary strong, .attendance-week summary small { display: block; }
+.attendance-week summary small { color: var(--muted); font-weight: 500; margin-top: 3px; }
+.attendance-week .table-wrap { border-top: 1px solid var(--line); }
+.attendance-export-row { display: flex; justify-content: flex-end; padding: 10px 14px; }
+.attendance-week .table-wrap table { min-width: 980px; }
+.attendance-programmed { font-weight: 700; }
+.attendance-week .table-wrap .attendance-matrix { min-width: 1380px; table-layout: fixed; }
+.attendance-matrix thead th { text-align: center; }
+.attendance-matrix thead th:first-child { text-align: left; width: 175px; }
+.attendance-matrix thead small, .attendance-matrix-person small { color: var(--muted); display: block; font-weight: 500; margin-top: 3px; }
+.attendance-matrix-person { background: var(--surface); left: 0; position: sticky; text-align: left; z-index: 2; }
+.attendance-matrix-cell { min-width: 165px; padding: 11px; vertical-align: top; }
+.attendance-matrix-cell small { color: var(--muted); display: block; font-size: .68rem; margin-top: 7px; text-transform: uppercase; }
+.attendance-matrix-cell small:first-child { margin-top: 0; }
+.attendance-matrix-cell strong { display: block; font-size: .87rem; margin-top: 2px; }
+.attendance-matrix-empty { color: var(--muted); text-align: center; }
+.attendance-on-time, .attendance-early, .attendance-late, .attendance-incidence, .attendance-no-schedule { border-radius: 999px; display: inline-block; font-size: .72rem; font-weight: 800; margin-top: 9px; padding: 4px 8px; }
+.attendance-on-time, .attendance-early { background: #d9f4e4; color: #176b3b; }
+.attendance-late { background: #ffe1dc; color: #a52b1b; }
+.attendance-incidence { background: var(--gold-soft); color: #735500; }
+.attendance-no-schedule { background: #ece8e1; color: var(--muted); }
+.status.done { background: #d9f4e4; color: #176b3b; }
+.status.pending { background: var(--gold-soft); color: #735500; }
+
 @media (max-width: 900px) {
   .sales-charts-grid { grid-template-columns: 1fr; }
+  .schedule-toolbar { grid-template-columns: 1fr; }
+  .attendance-times { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 560px) {
+  #attendanceCorrectionForm .form-grid { grid-template-columns: 1fr; }
+  #attendanceCorrectionModal .modal-card { max-height: calc(100vh - 24px); overflow-y: auto; }
 }

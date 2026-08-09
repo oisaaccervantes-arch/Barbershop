@@ -32,11 +32,20 @@ class CashShift(Base):
     card_reported: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     transfer_reported: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     closing_notes: Mapped[str | None] = mapped_column(String(1000))
+    evidence_file_name: Mapped[str | None] = mapped_column(String(255))
+    evidence_original_name: Mapped[str | None] = mapped_column(String(255))
+    evidence_content_type: Mapped[str | None] = mapped_column(String(100))
+    evidence_uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    evidence_uploaded_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    closed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
     barbers = relationship("ShiftBarber", back_populates="shift", cascade="all, delete-orphan")
     sales = relationship("Sale", back_populates="shift")
     expenses = relationship("ShiftExpense", back_populates="shift", cascade="all, delete-orphan")
     receptionist = relationship("Receptionist")
+    attendance_records = relationship("AttendanceRecord", back_populates="shift", cascade="all, delete-orphan")
+    evidence_uploaded_by = relationship("User", foreign_keys=[evidence_uploaded_by_user_id])
+    closed_by = relationship("User", foreign_keys=[closed_by_user_id])
 
 
 class ShiftBarber(Base):

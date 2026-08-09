@@ -4,6 +4,7 @@ const isLocalFrontendServer = ["127.0.0.1", "localhost"].includes(window.locatio
 const API_BASE_URL = isLocalFrontendServer
   ? "http://127.0.0.1:8000/api"
   : `${window.location.origin}/api`;
+const apiFileUrl = path => `${API_BASE_URL.replace(/\/api$/, "")}${path}`;
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input, init = {}) => {
   const response = await originalFetch(input, { ...init, credentials: "include" });
@@ -69,6 +70,12 @@ let servicePickerDraftIds = new Set();
 let pendingCloseShiftData = null;
 let authenticatedUser = null;
 let suggestedStartingReceipt = null;
+let currentAttendance = [];
+let attendanceHistory = [];
+let workSchedules = [];
+let scheduleCopySourceCell = null;
+let selectedSchedulePeople = new Set();
+let scheduleSelectionContext = "";
 
 const appointmentStatusFromApi = {
   PENDING: "pendiente",
@@ -300,6 +307,20 @@ async function loadShiftHistoryFromApi() {
   const response = await fetch(`${API_BASE_URL}/shifts`);
   if (!response.ok) throw new Error("No fue posible consultar el historial de turnos");
   shiftHistory = await response.json();
+}
+
+async function loadAttendanceFromApi() {
+  const [currentResponse, historyResponse, schedulesResponse] = await Promise.all([
+    fetch(`${API_BASE_URL}/attendance/current`),
+    fetch(`${API_BASE_URL}/attendance/history`),
+    fetch(`${API_BASE_URL}/attendance/schedules`)
+  ]);
+  if (!currentResponse.ok || !historyResponse.ok || !schedulesResponse.ok) {
+    throw new Error("No fue posible consultar el checador");
+  }
+  currentAttendance = await currentResponse.json();
+  attendanceHistory = await historyResponse.json();
+  workSchedules = await schedulesResponse.json();
 }
 
 async function loadSuggestedReceiptFromApi() {
@@ -555,12 +576,21 @@ function formatAppointmentDate(isoDate) {
 
 function currentSaleCustomer() {
   const form = $("#saleForm");
-  return catalogCustomers.find(customer => customer.id === form.customer.dataset.customerId)
+  const savedCustomer = catalogCustomers.find(customer => customer.id === form.customer.dataset.customerId)
     || catalogCustomers.find(customer =>
       customer.active
       && customer.phone === form.phone.value.trim()
       && customer.name.toLocaleLowerCase("es-MX") === form.customer.value.trim().toLocaleLowerCase("es-MX")
     );
+  if (savedCustomer) return savedCustomer;
+
+  const birthDate = parseBirthDate(form.birthDate.value);
+  return birthDate ? {
+    id: null,
+    name: form.customer.value.trim(),
+    phone: form.phone.value.trim(),
+    birthDate
+  } : null;
 }
 
 const roundMoney = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
@@ -724,6 +754,9 @@ function showLogin(message = "") {
 function showApplication(user) {
   authenticatedUser = user;
   $("#sessionUserName").textContent = user.full_name;
+  document.querySelectorAll("[data-admin-only]").forEach(element =>
+    element.classList.toggle("hidden", user.role !== "ADMIN")
+  );
   $("#loginScreen").classList.add("hidden");
   $("#loginError").classList.add("hidden");
 }
@@ -738,7 +771,8 @@ async function loadApplicationData() {
     loadSalesFromApi(),
     loadCurrentShiftFromApi(),
     loadShiftHistoryFromApi(),
-    loadSuggestedReceiptFromApi()
+    loadSuggestedReceiptFromApi(),
+    loadAttendanceFromApi()
   ]);
   renderAll();
 }
@@ -998,6 +1032,19 @@ function renderShift() {
   const expectedCash = roundMoney(Number(currentShift.opening_cash) + expectedSalesCash);
   $("#closeShiftForm").fundReserved.value = Number(currentShift.opening_cash);
 
+  const evidenceStatus = $("#shiftEvidenceStatus");
+  const evidencePreview = $("#shiftEvidencePreview");
+  const closeShiftButton = $("#closeShiftButton");
+  evidenceStatus.textContent = currentShift.evidence_url ? "Adjuntada" : "Pendiente";
+  evidenceStatus.classList.toggle("complete", Boolean(currentShift.evidence_url));
+  closeShiftButton.classList.toggle("requires-evidence", !currentShift.evidence_url);
+  if (currentShift.evidence_url) closeShiftButton.removeAttribute("aria-describedby");
+  else closeShiftButton.setAttribute("aria-describedby", "shiftEvidenceStatus");
+  closeShiftButton.title = currentShift.evidence_url ? "" : "Adjunta la evidencia del checador para cerrar";
+  evidencePreview.innerHTML = currentShift.evidence_url
+    ? `<a href="${apiFileUrl(currentShift.evidence_url)}" target="_blank" rel="noopener"><img src="${apiFileUrl(currentShift.evidence_url)}?v=${encodeURIComponent(currentShift.evidence_uploaded_at || "")}" alt="Evidencia del checador"><span><strong>${escapeHtml(currentShift.evidence_original_name || "Evidencia del checador")}</strong><small>Adjuntada ${new Date(currentShift.evidence_uploaded_at).toLocaleString("es-MX")}${currentShift.evidence_uploaded_by_name ? ` por ${escapeHtml(currentShift.evidence_uploaded_by_name)}` : ""}. Puedes reemplazarla seleccionando otra imagen.</small></span></a>`
+    : `<p class="muted">Todavía no se ha adjuntado la foto de este corte.</p>`;
+
   $("#shiftSystemTotals").innerHTML = `
     <div class="cut-line"><span>Fondo inicial</span><strong>${money(currentShift.opening_cash)}</strong></div>
     <div class="cut-line"><span>Ventas en efectivo</span><strong>${money(cashSales)}</strong></div>
@@ -1134,6 +1181,7 @@ function historicalShiftDetail(shift, summary) {
       <section class="history-detail-card">
         <h4>Conciliación</h4>
         <div class="cut-line"><span>Recepcionista</span><strong>${escapeHtml(shift.receptionist?.name || "Sin registrar")}</strong></div>
+        <div class="cut-line"><span>Cerrado por</span><strong>${escapeHtml(shift.closed_by_name || "Sin registrar")}</strong></div>
         <div class="cut-line"><span>Fondo inicial</span><strong>${money(shift.opening_cash)}</strong></div>
         <div class="cut-line"><span>Fondo que quedó en caja</span><strong>${money(shift.opening_cash)}</strong></div>
         <div class="cut-line"><span>Efectivo de ventas esperado</span><strong>${money(summary.expectedSalesCash)}</strong></div>
@@ -1152,6 +1200,12 @@ function historicalShiftDetail(shift, summary) {
         `).join("") || `<p class="muted">Sin gastos registrados.</p>`}
         <div class="cut-line total"><span>Total de gastos</span><strong>${money(summary.expenses)}</strong></div>
         <div class="closing-notes"><strong>Notas del cierre</strong><p>${escapeHtml(shift.closing_notes || "Sin notas registradas.")}</p></div>
+        <div class="closing-notes"><strong>Evidencia del checador</strong>${shift.evidence_url
+          ? `<a class="evidence-history-card" href="${apiFileUrl(shift.evidence_url)}" target="_blank" rel="noopener">
+              <img src="${apiFileUrl(shift.evidence_url)}" alt="Evidencia del checador del turno">
+              <span><strong>${escapeHtml(shift.evidence_original_name || "Foto del checador")}</strong><small>Adjuntada ${new Date(shift.evidence_uploaded_at).toLocaleString("es-MX")}${shift.evidence_uploaded_by_name ? ` por ${escapeHtml(shift.evidence_uploaded_by_name)}` : ""}</small><em><span class="material-symbols-outlined">open_in_new</span> Abrir imagen completa</em></span>
+            </a>`
+          : `<p>Este corte anterior no tiene evidencia registrada.</p>`}</div>
       </section>
       <section class="history-detail-card">
         <h4>Producción por barbero</h4>
@@ -1390,6 +1444,218 @@ function renderCancellations() {
   }).join("") || `<tr><td colspan="6">No hay cancelaciones que coincidan con la búsqueda.</td></tr>`;
 }
 
+const attendanceStatusLabels = {
+  PENDING: "Pendiente", PRESENT: "Asistió", ABSENT: "Falta",
+  REST: "Descanso", PERMISSION: "Permiso"
+};
+const weekDayLabels = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+const shiftTypeLabels = { MORNING: "Matutino", EVENING: "Vespertino" };
+
+function attendanceTime(value) {
+  return value ? new Date(value).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }) : "—";
+}
+
+function localDateTimeInput(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function mondayIso(date = new Date()) {
+  const value = new Date(date);
+  value.setHours(12, 0, 0, 0);
+  value.setDate(value.getDate() - ((value.getDay() + 6) % 7));
+  return value.toISOString().slice(0, 10);
+}
+
+function schedulePeople() {
+  return [
+    ...catalogReceptionists.filter(person => person.active).map(person => ({ ...person, personType: "RECEPTIONIST" })),
+    ...catalogBarbers.filter(person => person.active).map(person => ({ ...person, personType: "BARBER" }))
+  ];
+}
+
+function schedulePersonKey(personType, personId) {
+  return `${personType}-${personId}`;
+}
+
+function captureVisibleScheduleDraft() {
+  const form = $("#scheduleForm");
+  if (!form.weekStart.value) return;
+  const week = form.weekStart.value;
+  const shift = form.shiftType.value;
+  const drafts = [...form.querySelectorAll("[data-schedule-cell]")].flatMap(cell => {
+    const resting = cell.querySelector("[data-schedule-rest]").checked;
+    const value = field => cell.querySelector(`[data-field="${field}"]`).value || null;
+    const startTime = value("start_time");
+    const endTime = value("end_time");
+    if (!resting && !startTime && !endTime) return [];
+    return [{
+      week_start: week, shift_type: shift,
+      person_type: cell.dataset.personType, person_id: Number(cell.dataset.personId),
+      day_of_week: Number(cell.dataset.day), status: resting ? "REST" : "WORK",
+      start_time: resting ? null : startTime, end_time: resting ? null : endTime,
+      meal_start: resting ? null : value("meal_start"), meal_end: resting ? null : value("meal_end")
+    }];
+  });
+  workSchedules = workSchedules.filter(item => !(
+    String(item.week_start).slice(0, 10) === week && item.shift_type === shift
+  ));
+  workSchedules.push(...drafts);
+}
+
+function scheduleCell(person, dayIndex, schedule) {
+  const key = `${person.personType}-${person.id}-${dayIndex}`;
+  const resting = schedule?.status === "REST";
+  return `<td class="schedule-day-cell" data-schedule-cell="${key}" data-person-type="${person.personType}" data-person-id="${person.id}" data-day="${dayIndex}">
+    <label class="schedule-rest"><input type="checkbox" data-schedule-rest ${resting ? "checked" : ""}> Descanso</label>
+    <div class="schedule-time-pair ${resting ? "hidden" : ""}" data-schedule-times>
+      <label><small>Entrada</small><input type="time" data-field="start_time" value="${schedule?.start_time?.slice(0, 5) || ""}"></label>
+      <label><small>Salida</small><input type="time" data-field="end_time" value="${schedule?.end_time?.slice(0, 5) || ""}"></label>
+      <label><small>Comida</small><input type="time" data-field="meal_start" value="${schedule?.meal_start?.slice(0, 5) || ""}"></label>
+      <label><small>Regreso</small><input type="time" data-field="meal_end" value="${schedule?.meal_end?.slice(0, 5) || ""}"></label>
+    </div>
+    <button class="schedule-repeat-button" type="button" data-repeat-schedule>Repetir horario</button>
+  </td>`;
+}
+
+function renderWeeklySchedule() {
+  const form = $("#scheduleForm");
+  if (!form.weekStart.value) form.weekStart.value = mondayIso();
+  const selectedWeek = form.weekStart.value;
+  const selectedShift = form.shiftType.value;
+  const context = `${selectedWeek}|${selectedShift}`;
+  if (scheduleSelectionContext !== context) {
+    selectedSchedulePeople = new Set(
+      workSchedules
+        .filter(item => String(item.week_start).slice(0, 10) === selectedWeek && item.shift_type === selectedShift)
+        .map(item => schedulePersonKey(item.person_type, item.person_id))
+    );
+    scheduleSelectionContext = context;
+  }
+  $("#schedulePeopleOptions").innerHTML = schedulePeople().map(person => {
+    const key = schedulePersonKey(person.personType, person.id);
+    return `<label class="schedule-person-option"><input type="checkbox" value="${key}" ${selectedSchedulePeople.has(key) ? "checked" : ""}>
+      <span><strong>${escapeHtml(person.name)}</strong><small>${person.personType === "BARBER" ? "Barbero" : "Recepción"}</small></span></label>`;
+  }).join("") || "No hay personal activo.";
+  const dates = weekDayLabels.map((label, index) => {
+    const date = new Date(`${selectedWeek}T12:00:00`);
+    date.setDate(date.getDate() + index);
+    return `${label}<small>${date.toLocaleDateString("es-MX", { day: "numeric", month: "short" })}</small>`;
+  });
+  $("#scheduleWeekHeader").innerHTML = `<th>Personal</th>${dates.map(value => `<th>${value}</th>`).join("")}`;
+  const visiblePeople = schedulePeople().filter(person => selectedSchedulePeople.has(schedulePersonKey(person.personType, person.id)));
+  $("#scheduleRows").innerHTML = visiblePeople.map(person => {
+    const cells = weekDayLabels.map((_, dayIndex) => {
+      const schedule = workSchedules.find(item =>
+        String(item.week_start).slice(0, 10) === selectedWeek && item.shift_type === selectedShift &&
+        item.person_type === person.personType && Number(item.person_id) === Number(person.id) &&
+        Number(item.day_of_week) === dayIndex
+      );
+      return scheduleCell(person, dayIndex, schedule);
+    }).join("");
+    return `<tr><th class="schedule-person"><strong>${escapeHtml(person.name)}</strong><small>${person.personType === "BARBER" ? "Barbero" : "Recepción"}</small></th>${cells}</tr>`;
+  }).join("") || `<tr><td colspan="8">Selecciona arriba el personal que trabajará en este turno.</td></tr>`;
+}
+
+function renderAttendance() {
+  $("#attendanceShiftLabel").textContent = currentShift
+    ? `${shiftTypeLabels[currentShift.shift_type]} · ${currentShift.business_date}`
+    : "Abre un turno para comenzar a registrar.";
+  $("#attendanceCurrentRows").innerHTML = currentAttendance.map(record => {
+    const canClockIn = record.status === "PENDING" && !record.clock_in;
+    const canMealOut = record.clock_in && !record.meal_out && !record.clock_out;
+    const canMealIn = record.meal_out && !record.meal_in && !record.clock_out;
+    const canClockOut = record.clock_in && !record.clock_out;
+    return `
+      <article class="attendance-card ${record.complete ? "complete" : ""}">
+        <div class="attendance-person">
+          <div><strong>${escapeHtml(record.person_name)}</strong><small>${record.person_type === "BARBER" ? "Barbero" : "Recepción"}</small></div>
+          <span class="status ${record.complete ? "done" : "pending"}">${attendanceStatusLabels[record.status]}</span>
+        </div>
+        <div class="attendance-times">
+          <span><small>Programado</small>${record.scheduled_start ? `${record.scheduled_start.slice(0, 5)}–${record.scheduled_end.slice(0, 5)}` : "Sin horario"}</span>
+          <span><small>Entrada</small>${attendanceTime(record.clock_in)}</span>
+          <span><small>Comida</small>${attendanceTime(record.meal_out)} / ${attendanceTime(record.meal_in)}</span>
+          <span><small>Salida</small>${attendanceTime(record.clock_out)}</span>
+        </div>
+        <div class="attendance-actions">
+          ${canClockIn ? `<button class="submit-button compact" data-attendance-event="CLOCK_IN" data-record-id="${record.id}">Registrar entrada</button>` : ""}
+          ${canMealOut ? `<button class="secondary-button compact" data-attendance-event="MEAL_OUT" data-record-id="${record.id}">Salir a comida</button>` : ""}
+          ${canMealIn ? `<button class="secondary-button compact" data-attendance-event="MEAL_IN" data-record-id="${record.id}">Regresar de comida</button>` : ""}
+          ${canClockOut ? `<button class="submit-button compact" data-attendance-event="CLOCK_OUT" data-record-id="${record.id}">Registrar salida</button>` : ""}
+          ${canClockIn ? `<button class="secondary-button compact" data-attendance-event="ABSENT" data-record-id="${record.id}">Falta</button><button class="secondary-button compact" data-attendance-event="PERMISSION" data-record-id="${record.id}">Permiso</button>` : ""}
+          ${authenticatedUser?.role === "ADMIN" ? `<button class="secondary-button compact" data-correct-attendance="${record.id}">Corregir</button>` : ""}
+        </div>
+        ${record.recorded_by_name || record.corrected_by_name ? `<p class="attendance-audit">${record.recorded_by_name ? `Último registro: <strong>${escapeHtml(record.recorded_by_name)}</strong>` : ""}${record.corrected_by_name ? `${record.recorded_by_name ? " · " : ""}Corrección: <strong>${escapeHtml(record.corrected_by_name)}</strong>` : ""}</p>` : ""}
+      </article>`;
+  }).join("") || `<div class="cart-empty">No hay personal en un turno abierto.</div>`;
+
+  renderWeeklySchedule();
+
+  const attendanceWeeks = new Map();
+  attendanceHistory.forEach(record => {
+    const week = mondayIso(new Date(`${record.business_date}T12:00:00`));
+    if (!attendanceWeeks.has(week)) attendanceWeeks.set(week, []);
+    attendanceWeeks.get(week).push(record);
+  });
+  $("#attendanceHistoryGroups").innerHTML = [...attendanceWeeks.entries()]
+    .sort(([weekA], [weekB]) => weekB.localeCompare(weekA))
+    .map(([week, records], index) => {
+      const start = new Date(`${week}T12:00:00`);
+      const end = new Date(start); end.setDate(end.getDate() + 6);
+      const range = `${start.toLocaleDateString("es-MX", { day: "numeric", month: "long" })} al ${end.toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })}`;
+      const present = records.filter(record => record.status === "PRESENT").length;
+      const matrixRows = new Map();
+      records.forEach(record => {
+        const key = `${record.person_type}-${record.person_id}-${record.shift_type}`;
+        if (!matrixRows.has(key)) matrixRows.set(key, {
+          name: record.person_name, personType: record.person_type,
+          shiftType: record.shift_type, days: new Map()
+        });
+        const dayIndex = (new Date(`${record.business_date}T12:00:00`).getDay() + 6) % 7;
+        matrixRows.get(key).days.set(dayIndex, record);
+      });
+      const dayHeaders = weekDayLabels.map((day, dayIndex) => {
+        const date = new Date(start); date.setDate(date.getDate() + dayIndex);
+        return `<th>${day}<small>${date.toLocaleDateString("es-MX", { day: "numeric", month: "short" })}</small></th>`;
+      }).join("");
+      const differenceLabel = record => {
+        if (record.status !== "PRESENT") return `<span class="attendance-incidence">${attendanceStatusLabels[record.status]}</span>`;
+        if (!record.scheduled_start || !record.clock_in) return `<span class="attendance-no-schedule">Sin comparación</span>`;
+        const expected = new Date(`${record.business_date}T${record.scheduled_start.slice(0, 8)}`);
+        const minutes = Math.round((new Date(record.clock_in) - expected) / 60000);
+        if (minutes === 0) return `<span class="attendance-on-time">A la hora</span>`;
+        if (minutes < 0) return `<span class="attendance-early">${Math.abs(minutes)} min antes</span>`;
+        return `<span class="attendance-late">+${minutes} min</span>`;
+      };
+      return `<details class="attendance-week" ${index === 0 ? "open" : ""}>
+        <summary><span><strong>Semana del ${range}</strong><small>${records.length} registros · ${present} asistencias</small></span></summary>
+        <div class="attendance-export-row"><button class="secondary-button compact" type="button" data-export-attendance-week="${week}"><span class="material-symbols-outlined">download</span> Exportar Excel</button></div>
+        <div class="table-wrap"><table class="attendance-matrix">
+          <thead><tr><th>Personal</th>${dayHeaders}</tr></thead>
+          <tbody>${[...matrixRows.values()].sort((a, b) => a.name.localeCompare(b.name)).map(person => `
+            <tr><th class="attendance-matrix-person"><strong>${escapeHtml(person.name)}</strong><small>${person.personType === "BARBER" ? "Barbero" : "Recepción"} · ${shiftTypeLabels[person.shiftType]}</small></th>
+              ${weekDayLabels.map((_, dayIndex) => {
+                const record = person.days.get(dayIndex);
+                if (!record) return `<td class="attendance-matrix-empty">—</td>`;
+                const programmed = record.scheduled_start ? `${record.scheduled_start.slice(0, 5)}–${record.scheduled_end.slice(0, 5)}` : "Sin horario";
+                return `<td class="attendance-matrix-cell">
+                  <small>Programado</small><strong>${programmed}</strong>
+                  <small>Llegó</small><strong>${attendanceTime(record.clock_in)}</strong>
+                  ${differenceLabel(record)}
+                  ${record.recorded_by_name ? `<small>Registró: ${escapeHtml(record.recorded_by_name)}</small>` : ""}
+                  ${record.corrected_by_name ? `<small>Corrigió: ${escapeHtml(record.corrected_by_name)}</small>` : ""}
+                  ${authenticatedUser?.role === "ADMIN" ? `<button class="schedule-repeat-button" data-correct-attendance="${record.id}">Corregir</button>` : ""}
+                </td>`;
+              }).join("")}
+            </tr>`).join("")}</tbody>
+        </table></div>
+      </details>`;
+    }).join("") || `<div class="cart-empty">Todavía no hay asistencias registradas.</div>`;
+}
+
 function renderAll() {
   renderSelects();
   renderShell();
@@ -1403,6 +1669,7 @@ function renderAll() {
   renderShiftHistory();
   renderSalesReport();
   renderCancellations();
+  renderAttendance();
 }
 
 function switchView(view) {
@@ -1415,7 +1682,8 @@ function switchView(view) {
     barbers: "Personal",
     customers: "Clientes",
     sales: "Ventas",
-    shift: "Corte de turno"
+    shift: "Corte de turno",
+    attendance: "Checador"
   };
   $("#viewTitle").textContent = titles[view] || view;
 }
@@ -1501,6 +1769,65 @@ function shiftTicket() {
 document.addEventListener("click", async event => {
   const nav = event.target.closest("[data-view]");
   if (nav) switchView(nav.dataset.view);
+
+  const attendanceEvent = event.target.closest("[data-attendance-event]");
+  if (attendanceEvent) {
+    attendanceEvent.disabled = true;
+    try {
+      const response = await fetch(`${API_BASE_URL}/attendance/${attendanceEvent.dataset.recordId}/event`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event: attendanceEvent.dataset.attendanceEvent })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || "No fue posible registrar la asistencia");
+      await loadAttendanceFromApi();
+      renderAttendance();
+      showToast("Asistencia actualizada");
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      attendanceEvent.disabled = false;
+    }
+  }
+
+  const correctAttendance = event.target.closest("[data-correct-attendance]");
+  if (correctAttendance) {
+    const record = [...currentAttendance, ...attendanceHistory]
+      .find(item => String(item.id) === correctAttendance.dataset.correctAttendance);
+    if (record) {
+      const form = $("#attendanceCorrectionForm");
+      form.recordId.value = record.id;
+      form.clockIn.value = localDateTimeInput(record.clock_in);
+      form.mealOut.value = localDateTimeInput(record.meal_out);
+      form.mealIn.value = localDateTimeInput(record.meal_in);
+      form.clockOut.value = localDateTimeInput(record.clock_out);
+      form.status.value = record.status;
+      form.notes.value = record.notes || "";
+      $("#attendanceCorrectionName").textContent = record.person_name;
+      $("#attendanceCorrectionModal").classList.remove("hidden");
+    }
+  }
+
+  const deleteSchedule = event.target.closest("[data-delete-schedule]");
+  if (deleteSchedule) {
+    if (deleteSchedule.dataset.confirmDelete !== "true") {
+      deleteSchedule.dataset.confirmDelete = "true";
+      deleteSchedule.textContent = "Confirmar eliminación";
+      deleteSchedule.className = "secondary-button compact";
+      showToast("Presiona nuevamente para eliminar el horario");
+      return;
+    }
+    const response = await fetch(`${API_BASE_URL}/attendance/schedules/${deleteSchedule.dataset.deleteSchedule}`, { method: "DELETE" });
+    if (response.ok) {
+      await loadAttendanceFromApi();
+      renderAttendance();
+      showToast("Horario eliminado");
+    } else {
+      const result = await response.json().catch(() => ({}));
+      showToast(result.detail || "No fue posible eliminar el horario");
+    }
+  }
 
   const appointmentTab = event.target.closest("[data-appointment-view]");
   if (appointmentTab) {
@@ -1757,6 +2084,7 @@ document.addEventListener("click", async event => {
         $("#saleForm").phone.value = appointment.phone || "";
         $("#saleForm").birthDate.value = formatBirthDate(appointment.birthDate);
         $("#saleForm").customer.readOnly = true;
+        $("#saleForm").customer.dataset.customerId = appointment.customerId;
         $("#saleForm").barber.value = appointment.barberId;
         pendingAppointmentId = appointment.id;
         switchView("cashier");
@@ -2015,7 +2343,213 @@ document.querySelectorAll('input[name="birthDate"]').forEach(input => {
     input.value = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)]
       .filter(Boolean)
       .join("/");
+    if (input.form?.id === "saleForm") {
+      birthdayDiscountServiceId = null;
+      renderCart();
+    }
   });
+});
+
+$("#scheduleForm").weekStart.addEventListener("change", renderWeeklySchedule);
+$("#scheduleForm").shiftType.addEventListener("change", renderWeeklySchedule);
+$("#schedulePeopleOptions").addEventListener("change", event => {
+  if (!event.target.matches('input[type="checkbox"]')) return;
+  captureVisibleScheduleDraft();
+  if (event.target.checked) selectedSchedulePeople.add(event.target.value);
+  else selectedSchedulePeople.delete(event.target.value);
+  renderWeeklySchedule();
+});
+$("#scheduleRows").addEventListener("change", event => {
+  if (!event.target.matches("[data-schedule-rest]")) return;
+  const times = event.target.closest("[data-schedule-cell]").querySelector("[data-schedule-times]");
+  times.classList.toggle("hidden", event.target.checked);
+  if (event.target.checked) times.querySelectorAll("input").forEach(input => { input.value = ""; });
+});
+
+function closeRepeatScheduleModal() {
+  $("#repeatScheduleModal").classList.add("hidden");
+  $("#repeatScheduleForm").reset();
+  scheduleCopySourceCell = null;
+}
+
+$("#scheduleRows").addEventListener("click", event => {
+  const button = event.target.closest("[data-repeat-schedule]");
+  if (!button) return;
+  scheduleCopySourceCell = button.closest("[data-schedule-cell]");
+  const sourceDay = Number(scheduleCopySourceCell.dataset.day);
+  const personName = scheduleCopySourceCell.closest("tr").querySelector(".schedule-person strong").textContent;
+  $("#repeatScheduleDescription").textContent = `${personName}: repetir el horario de ${weekDayLabels[sourceDay]} en:`;
+  $("#repeatScheduleDays").innerHTML = weekDayLabels.map((day, index) => index === sourceDay ? "" :
+    `<label><input type="checkbox" name="targetDay" value="${index}"> ${day}</label>`
+  ).join("");
+  $("#repeatScheduleModal").classList.remove("hidden");
+});
+
+$("#closeRepeatSchedule").addEventListener("click", closeRepeatScheduleModal);
+$("#cancelRepeatSchedule").addEventListener("click", closeRepeatScheduleModal);
+$("#repeatScheduleForm").addEventListener("submit", event => {
+  event.preventDefault();
+  if (!scheduleCopySourceCell) return;
+  const selectedDays = [...event.currentTarget.querySelectorAll('input[name="targetDay"]:checked')]
+    .map(input => input.value);
+  if (!selectedDays.length) return showToast("Selecciona al menos un día");
+  const personType = scheduleCopySourceCell.dataset.personType;
+  const personId = scheduleCopySourceCell.dataset.personId;
+  const resting = scheduleCopySourceCell.querySelector("[data-schedule-rest]").checked;
+  const sourceValues = Object.fromEntries(
+    [...scheduleCopySourceCell.querySelectorAll("[data-field]")].map(input => [input.dataset.field, input.value])
+  );
+  selectedDays.forEach(day => {
+    const target = $("#scheduleRows").querySelector(
+      `[data-schedule-cell][data-person-type="${personType}"][data-person-id="${personId}"][data-day="${day}"]`
+    );
+    target.querySelector("[data-schedule-rest]").checked = resting;
+    target.querySelector("[data-schedule-times]").classList.toggle("hidden", resting);
+    target.querySelectorAll("[data-field]").forEach(input => {
+      input.value = resting ? "" : sourceValues[input.dataset.field];
+    });
+  });
+  closeRepeatScheduleModal();
+  showToast(`Horario repetido en ${selectedDays.length} día${selectedDays.length === 1 ? "" : "s"}`);
+});
+
+$("#copyPreviousWeek").addEventListener("click", () => {
+  const form = $("#scheduleForm");
+  const current = new Date(`${form.weekStart.value}T12:00:00`);
+  current.setDate(current.getDate() - 7);
+  const previousWeek = current.toISOString().slice(0, 10);
+  const previous = workSchedules.filter(item => item.week_start === previousWeek && item.shift_type === form.shiftType.value);
+  if (!previous.length) return showToast("La semana anterior no tiene horarios guardados");
+  workSchedules = workSchedules.filter(item => !(item.week_start === form.weekStart.value && item.shift_type === form.shiftType.value));
+  workSchedules.push(...previous.map(item => ({ ...item, id: null, week_start: form.weekStart.value })));
+  selectedSchedulePeople = new Set(previous.map(item => schedulePersonKey(item.person_type, item.person_id)));
+  renderWeeklySchedule();
+  showToast("Semana anterior copiada. Presiona Guardar para confirmar");
+});
+
+async function downloadExcel(url, fallbackName) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.detail || "No fue posible generar el archivo Excel");
+  }
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || fallbackName;
+  const objectUrl = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+$("#exportScheduleExcel").addEventListener("click", async event => {
+  const form = $("#scheduleForm");
+  event.currentTarget.disabled = true;
+  try {
+    const params = new URLSearchParams({ week_start: form.weekStart.value, shift_type: form.shiftType.value });
+    await downloadExcel(`${API_BASE_URL}/attendance/export/schedule?${params}`, `horario_${form.weekStart.value}.xlsx`);
+    showToast("Horario exportado a Excel");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    event.currentTarget.disabled = false;
+  }
+});
+
+$("#attendanceHistoryGroups").addEventListener("click", async event => {
+  const button = event.target.closest("[data-export-attendance-week]");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const week = button.dataset.exportAttendanceWeek;
+    await downloadExcel(`${API_BASE_URL}/attendance/export/history?week_start=${encodeURIComponent(week)}`, `asistencias_${week}.xlsx`);
+    showToast("Asistencias exportadas a Excel");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$("#scheduleForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    if (!selectedSchedulePeople.size) throw new Error("Selecciona al menos una persona para este turno");
+    const schedules = [...form.querySelectorAll("[data-schedule-cell]")].flatMap(cell => {
+    const resting = cell.querySelector("[data-schedule-rest]").checked;
+    const value = field => cell.querySelector(`[data-field="${field}"]`).value || null;
+    const startTime = value("start_time");
+    const endTime = value("end_time");
+    if (!resting && !startTime && !endTime) return [];
+    if (!resting && (!startTime || !endTime)) throw new Error("Cada día trabajado necesita entrada y salida");
+    return [{
+      week_start: form.weekStart.value,
+      person_type: cell.dataset.personType,
+      person_id: Number(cell.dataset.personId),
+      day_of_week: Number(cell.dataset.day),
+      shift_type: form.shiftType.value,
+      status: resting ? "REST" : "WORK",
+      start_time: resting ? null : startTime,
+      end_time: resting ? null : endTime,
+      meal_start: resting ? null : value("meal_start"),
+      meal_end: resting ? null : value("meal_end")
+    }];
+  });
+    const payload = { week_start: form.weekStart.value, shift_type: form.shiftType.value, schedules };
+    const response = await fetch(`${API_BASE_URL}/attendance/schedules/week`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+    });
+    const peopleWithSchedule = new Set(schedules.map(item => schedulePersonKey(item.person_type, item.person_id)));
+    if ([...selectedSchedulePeople].some(key => !peopleWithSchedule.has(key))) {
+      throw new Error("Cada persona seleccionada necesita al menos un día de trabajo o descanso");
+    }
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "No fue posible guardar el horario");
+    workSchedules = workSchedules.filter(item => !(
+      String(item.week_start).slice(0, 10) === form.weekStart.value &&
+      item.shift_type === form.shiftType.value
+    ));
+    workSchedules.push(...result);
+    renderAttendance();
+    showToast("Semana completa guardada");
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+function closeAttendanceCorrectionModal() {
+  $("#attendanceCorrectionModal").classList.add("hidden");
+  $("#attendanceCorrectionForm").reset();
+}
+$("#closeAttendanceCorrection").addEventListener("click", closeAttendanceCorrectionModal);
+$("#cancelAttendanceCorrection").addEventListener("click", closeAttendanceCorrectionModal);
+$("#attendanceCorrectionForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const toIso = value => value ? new Date(value).toISOString() : null;
+  try {
+    const response = await fetch(`${API_BASE_URL}/attendance/${form.recordId.value}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clock_in: toIso(form.clockIn.value), meal_out: toIso(form.mealOut.value),
+        meal_in: toIso(form.mealIn.value), clock_out: toIso(form.clockOut.value),
+        status: form.status.value, notes: form.notes.value || null
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "No fue posible corregir la asistencia");
+    closeAttendanceCorrectionModal();
+    await loadAttendanceFromApi();
+    renderAttendance();
+    showToast("Asistencia corregida");
+  } catch (error) {
+    showToast(error.message);
+  }
 });
 
 $("#openShiftForm").addEventListener("submit", async event => {
@@ -2042,6 +2576,7 @@ $("#openShiftForm").addEventListener("submit", async event => {
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.detail || "No fue posible abrir el turno");
     currentShift = result;
+    await loadAttendanceFromApi();
     renderAll();
     switchView("cashier");
     showToast("Turno abierto correctamente");
@@ -2077,9 +2612,59 @@ $("#expenseForm").addEventListener("submit", async event => {
 });
 
 $("#closeShiftForm").addEventListener("input", renderShift);
+$("#shiftEvidenceInput").addEventListener("change", event => {
+  const file = event.currentTarget.files[0];
+  $("#shiftEvidenceFileName").textContent = file ? file.name : "Ninguna imagen seleccionada";
+  $("#removeSelectedEvidence").classList.toggle("hidden", !file);
+});
+
+$("#removeSelectedEvidence").addEventListener("click", () => {
+  $("#shiftEvidenceInput").value = "";
+  $("#shiftEvidenceFileName").textContent = "Ninguna imagen seleccionada";
+  $("#removeSelectedEvidence").classList.add("hidden");
+  showToast("Selección de imagen eliminada");
+});
+
+$("#shiftEvidenceForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!currentShift) return;
+  const form = event.currentTarget;
+  const file = form.evidence.files[0];
+  if (!file) return showToast("Selecciona una imagen del checador");
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    const body = new FormData();
+    body.append("evidence", file);
+    const response = await fetch(`${API_BASE_URL}/shifts/${currentShift.id}/evidence`, {
+      method: "POST",
+      body
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "No fue posible subir la evidencia");
+    currentShift = result;
+    form.reset();
+    $("#shiftEvidenceFileName").textContent = "Ninguna imagen seleccionada";
+    $("#removeSelectedEvidence").classList.add("hidden");
+    renderAll();
+    showToast("Evidencia del checador guardada");
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "No fue posible subir la evidencia");
+  } finally {
+    button.disabled = false;
+  }
+});
+
 $("#closeShiftForm").addEventListener("submit", async event => {
   event.preventDefault();
   if (!currentShift) return;
+  if (!currentShift.evidence_url) {
+    showToast("Adjunta la evidencia del checador antes de cerrar el turno");
+    $("#shiftEvidenceForm").scrollIntoView({ behavior: "smooth", block: "center" });
+    $("#shiftEvidenceInput").focus();
+    return;
+  }
   const form = event.currentTarget;
   const fundReserved = Number(currentShift.opening_cash || 0);
   const cashSalesCounted = Number(form.cashSalesCounted.value || 0);
@@ -2124,7 +2709,7 @@ $("#confirmCloseShift").addEventListener("click", async event => {
     $("#closeShiftModal").classList.add("hidden");
     currentShift = null;
     pendingCloseShiftData = null;
-    await Promise.all([loadShiftHistoryFromApi(), loadSuggestedReceiptFromApi()]);
+    await Promise.all([loadShiftHistoryFromApi(), loadSuggestedReceiptFromApi(), loadAttendanceFromApi()]);
     $("#closeShiftForm").reset();
     renderAll();
     showToast("Turno cerrado correctamente");
