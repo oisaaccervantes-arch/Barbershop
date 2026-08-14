@@ -9,7 +9,9 @@ extraer dentro de `/opt/POS` ni reiniciar los contenedores de Yamal Sushi.
 - `bizantino-db`: PostgreSQL exclusivo de Bizantino.
 - `bizantino_db`: volumen persistente de la base de datos.
 - `bizantino_evidence`: volumen persistente de fotos del checador.
-- Puerto local predeterminado: `127.0.0.1:8010`.
+- Red privada propia para comunicarse con `bizantino-db`.
+- Conexión adicional de `bizantino-app` a la red externa `pos_default`, donde
+  Caddy puede resolverlo como `bizantino-app:8000`.
 - URL pública prevista: `https://oeba.com.mx/bizantino/`.
 
 ## Preparación en el servidor
@@ -30,7 +32,7 @@ docker compose build --no-cache app
 docker compose up -d
 docker compose ps
 docker compose logs --tail=100 app
-curl http://127.0.0.1:8010/api/health/database
+docker compose exec app python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/api/health/database').read().decode())"
 ```
 
 El contenedor ejecuta `alembic upgrade head` antes de iniciar Uvicorn.
@@ -42,7 +44,7 @@ host, la regla esperada es equivalente a:
 
 ```caddyfile
 handle_path /bizantino/* {
-    reverse_proxy 127.0.0.1:8010
+    reverse_proxy bizantino-app:8000
 }
 
 redir /bizantino /bizantino/ 308

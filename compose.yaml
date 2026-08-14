@@ -18,10 +18,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "127.0.0.1:${BIZANTINO_PORT:-8010}:8000"
     volumes:
       - bizantino_evidence:/data/shift_evidence
+    networks:
+      - default
+      - caddy
 
   db:
     image: postgres:17-alpine
@@ -42,3 +43,8 @@ services:
 volumes:
   bizantino_db:
   bizantino_evidence:
+
+networks:
+  caddy:
+    external: true
+    name: pos_default
