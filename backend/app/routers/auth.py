@@ -34,7 +34,7 @@ def login(payload: LoginRequest, response: Response, db: DatabaseSession):
         httponly=True,
         secure=settings.auth_cookie_secure,
         samesite="lax",
-        path="/",
+        path=settings.auth_cookie_path,
     )
     return serialize_user(user)
 
@@ -46,4 +46,4 @@ def current_user(request: Request):
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(response: Response):
-    response.delete_cookie(COOKIE_NAME, path="/")
+    response.delete_cookie(COOKIE_NAME, path=get_settings().auth_cookie_path)

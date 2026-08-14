@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
@@ -13,6 +14,8 @@ class Settings(BaseSettings):
     auth_secret_key: str = "dev-only-change-before-production"
     auth_cookie_secure: bool = False
     auth_session_hours: int = 12
+    auth_cookie_path: str = "/"
+    evidence_dir: str = "uploads/shift_evidence"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -30,6 +33,13 @@ class Settings(BaseSettings):
             port=self.db_port,
             database=self.db_name,
         )
+
+    @property
+    def evidence_path(self) -> Path:
+        path = Path(self.evidence_dir)
+        if path.is_absolute():
+            return path
+        return Path(__file__).resolve().parents[1] / path
 
 
 @lru_cache

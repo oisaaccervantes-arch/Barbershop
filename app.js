@@ -2,9 +2,12 @@ const STORE_KEY = "bizantino-barberia-v1";
 const ACTIVE_VIEW_KEY = "bizantino-active-view";
 const isLocalFrontendServer = ["127.0.0.1", "localhost"].includes(window.location.hostname)
   && window.location.port !== "8000";
+const deploymentBasePath = window.location.pathname.startsWith("/bizantino/")
+  ? "/bizantino"
+  : "";
 const API_BASE_URL = isLocalFrontendServer
   ? "http://127.0.0.1:8000/api"
-  : `${window.location.origin}/api`;
+  : `${window.location.origin}${deploymentBasePath}/api`;
 const apiFileUrl = path => `${API_BASE_URL.replace(/\/api$/, "")}${path}`;
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input, init = {}) => {

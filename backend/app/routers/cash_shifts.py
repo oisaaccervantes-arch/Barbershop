@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
+from app.config import get_settings
 from app.models.barber import Barber
 from app.models.cash_shift import CashShift, ShiftBarber, ShiftExpense
 from app.models.sale import Sale
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/api/shifts", tags=["shifts"])
 DatabaseSession = Annotated[Session, Depends(get_db)]
 LOCAL_ZONE = ZoneInfo("America/Hermosillo")
 MAX_RECEIPT_NUMBER = 10_000
-EVIDENCE_DIR = Path(__file__).resolve().parents[2] / "uploads" / "shift_evidence"
+EVIDENCE_DIR = get_settings().evidence_path
 MAX_EVIDENCE_BYTES = 8 * 1024 * 1024
 ALLOWED_EVIDENCE_TYPES = {
     "image/jpeg": ".jpg",
