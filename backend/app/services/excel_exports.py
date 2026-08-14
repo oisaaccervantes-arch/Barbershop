@@ -152,7 +152,8 @@ def export_attendance(db: Session, week_start: date) -> bytes:
                 comparison = "A la hora" if difference == 0 else (f"{abs(difference)} min antes" if difference < 0 else f"+{difference} min")
             else:
                 comparison = STATUS_LABELS.get(record.status, record.status)
-            values.append(f"Programado: {programmed}\nLlegó: {arrived}\n{comparison}")
+            continuation = "\nContinúa en vespertino" if record.continues_next_shift else ""
+            values.append(f"Programado: {programmed}\nLlegó: {arrived}\n{comparison}{continuation}")
         summary.append(values)
     style_table(summary, max(summary.max_row, 4), 8)
     summary.column_dimensions["A"].width = 27

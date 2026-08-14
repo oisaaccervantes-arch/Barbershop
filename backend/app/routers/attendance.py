@@ -37,7 +37,7 @@ def person(db: Session, person_type: str, person_id: int):
 
 
 def attendance_complete(row: AttendanceRecord) -> bool:
-    return row.status in {"ABSENT", "REST", "PERMISSION"} or (
+    return row.status in {"ABSENT", "REST", "PERMISSION"} or row.continues_next_shift or (
         row.clock_in is not None and row.clock_out is not None
     )
 
@@ -59,6 +59,8 @@ def serialize_attendance(row: AttendanceRecord) -> dict:
         "clock_out": row.clock_out,
         "status": row.status,
         "notes": row.notes,
+        "continues_next_shift": row.continues_next_shift,
+        "continued_from_record_id": row.continued_from_record_id,
         "recorded_by_name": row.recorded_by.full_name if row.recorded_by else None,
         "corrected_by_name": row.corrected_by.full_name if row.corrected_by else None,
         "complete": attendance_complete(row),

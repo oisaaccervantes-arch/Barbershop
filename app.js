@@ -1682,7 +1682,7 @@ function renderAttendance() {
       <article class="attendance-card ${record.complete ? "complete" : ""}">
         <div class="attendance-person">
           <div><strong>${escapeHtml(record.person_name)}</strong><small>${record.person_type === "BARBER" ? "Barbero" : "Recepción"}</small></div>
-          <span class="status ${record.complete ? "done" : "pending"}">${attendanceStatusLabels[record.status]}</span>
+          <span class="status ${record.complete ? "done" : "pending"}">${record.continues_next_shift ? "Continúa" : attendanceStatusLabels[record.status]}</span>
         </div>
         <div class="attendance-times">
           <span><small>Programado</small>${record.scheduled_start ? `${record.scheduled_start.slice(0, 5)}–${record.scheduled_end.slice(0, 5)}` : "Sin horario"}</span>
@@ -1690,6 +1690,7 @@ function renderAttendance() {
           <span><small>Comida</small>${attendanceTime(record.meal_out)} / ${attendanceTime(record.meal_in)}</span>
           <span><small>Salida</small>${attendanceTime(record.clock_out)}</span>
         </div>
+        ${record.continued_from_record_id ? `<p class="muted attendance-continuation">Jornada iniciada en el turno matutino.</p>` : ""}
         <div class="attendance-actions">
           ${canClockIn ? `<button class="submit-button compact" data-attendance-event="CLOCK_IN" data-record-id="${record.id}">Registrar entrada</button>` : ""}
           ${canMealOut ? `<button class="secondary-button compact" data-attendance-event="MEAL_OUT" data-record-id="${record.id}">Salir a comida</button>` : ""}
@@ -1759,6 +1760,7 @@ function renderAttendance() {
                     <small>Programado</small><strong>${programmed}</strong>
                     <small>Entrada real</small><strong>${attendanceTime(record.clock_in)}</strong>
                     <small>Salida real</small><strong>${attendanceTime(record.clock_out)}</strong>
+                    ${record.continues_next_shift ? `<span class="status done">Continúa en vespertino</span>` : ""}
                     ${differenceLabel(record)}
                     ${record.recorded_by_name ? `<small>Registró: ${escapeHtml(record.recorded_by_name)}</small>` : ""}
                     ${record.corrected_by_name ? `<small>Corrigió: ${escapeHtml(record.corrected_by_name)}</small>` : ""}

@@ -68,6 +68,8 @@ class AttendanceRead(BaseModel):
     clock_out: datetime | None
     status: AttendanceStatus
     notes: str | None
+    continues_next_shift: bool
+    continued_from_record_id: int | None
     recorded_by_name: str | None
     corrected_by_name: str | None
     complete: bool

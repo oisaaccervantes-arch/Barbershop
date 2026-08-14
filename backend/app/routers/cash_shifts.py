@@ -112,7 +112,7 @@ def schedule_for(db: Session, person_type: str, person_id: int, shift: CashShift
 
 def attendance_record(db: Session, shift: CashShift, person_type: str, employee):
     schedule = schedule_for(db, person_type, employee.id, shift)
-    return AttendanceRecord(
+    record = AttendanceRecord(
         shift=shift,
         person_type=person_type,
         person_id=employee.id,
@@ -121,6 +121,40 @@ def attendance_record(db: Session, shift: CashShift, person_type: str, employee)
         scheduled_end=schedule.end_time if schedule and schedule.status == "WORK" else None,
         status="REST" if schedule and schedule.status == "REST" else "PENDING",
     )
+    if shift.shift_type == "EVENING":
+        previous = db.scalar(
+            select(AttendanceRecord)
+            .join(AttendanceRecord.shift)
+            .where(
+                CashShift.business_date == shift.business_date,
+                CashShift.shift_type == "MORNING",
+                CashShift.status == "CLOSED",
+                AttendanceRecord.person_type == person_type,
+                AttendanceRecord.person_id == employee.id,
+                AttendanceRecord.continues_next_shift.is_(True),
+            )
+            .order_by(CashShift.id.desc())
+            .limit(1)
+        )
+        if previous:
+            record.clock_in = previous.clock_in
+            record.meal_out = previous.meal_out
+            record.meal_in = previous.meal_in
+            record.status = "PRESENT"
+            record.continued_from_record_id = previous.id
+    return record
+
+
+def works_evening(db: Session, row: AttendanceRecord, shift: CashShift) -> bool:
+    evening = db.scalar(select(WorkSchedule.id).where(
+        WorkSchedule.person_type == row.person_type,
+        WorkSchedule.person_id == row.person_id,
+        WorkSchedule.week_start == shift.business_date - timedelta(days=shift.business_date.weekday()),
+        WorkSchedule.day_of_week == shift.business_date.weekday(),
+        WorkSchedule.shift_type == "EVENING",
+        WorkSchedule.status == "WORK",
+    ))
+    return evening is not None
 
 
 @router.get("/current", response_model=CashShiftRead | None)
@@ -254,11 +288,18 @@ def close_shift(shift_id: int, payload: CashShiftClose, request: Request, db: Da
             status_code=409,
             detail="Adjunta la evidencia del checador antes de cerrar el turno",
         )
-    incomplete = [
-        row.person_name for row in shift.attendance_records
-        if row.status not in {"ABSENT", "REST", "PERMISSION"}
-        and (row.clock_in is None or row.clock_out is None)
-    ]
+    incomplete = []
+    for row in shift.attendance_records:
+        if row.status in {"ABSENT", "REST", "PERMISSION"}:
+            continue
+        if row.clock_in is None:
+            incomplete.append(row.person_name)
+            continue
+        if row.clock_out is None:
+            if shift.shift_type == "MORNING" and works_evening(db, row, shift):
+                row.continues_next_shift = True
+            else:
+                incomplete.append(row.person_name)
     if incomplete:
         raise HTTPException(
             status_code=409,
