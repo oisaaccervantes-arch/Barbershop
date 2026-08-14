@@ -1550,7 +1550,15 @@ function mondayIso(date = new Date()) {
   const value = new Date(date);
   value.setHours(12, 0, 0, 0);
   value.setDate(value.getDate() - ((value.getDay() + 6) % 7));
-  return value.toISOString().slice(0, 10);
+  return dateToLocalISO(value);
+}
+
+function normalizeSelectedWeekStart(value) {
+  const date = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  const daysUntilMonday = (8 - date.getDay()) % 7;
+  date.setDate(date.getDate() + daysUntilMonday);
+  return dateToLocalISO(date);
 }
 
 function schedulePeople() {
@@ -1607,6 +1615,7 @@ function scheduleCell(person, dayIndex, schedule) {
 function renderWeeklySchedule() {
   const form = $("#scheduleForm");
   if (!form.weekStart.value) form.weekStart.value = mondayIso();
+  form.weekStart.value = normalizeSelectedWeekStart(form.weekStart.value);
   const selectedWeek = form.weekStart.value;
   const selectedShift = form.shiftType.value;
   const context = `${selectedWeek}|${selectedShift}`;
@@ -2558,7 +2567,13 @@ document.querySelectorAll('input[name="birthDate"]').forEach(input => {
   });
 });
 
-$("#scheduleForm").weekStart.addEventListener("change", renderWeeklySchedule);
+$("#scheduleForm").weekStart.addEventListener("change", event => {
+  const selected = event.currentTarget.value;
+  const normalized = normalizeSelectedWeekStart(selected);
+  event.currentTarget.value = normalized;
+  if (selected && selected !== normalized) showToast(`La semana se ajustó al ${formatAppointmentDate(normalized)}`);
+  renderWeeklySchedule();
+});
 $("#scheduleForm").shiftType.addEventListener("change", renderWeeklySchedule);
 $("#savedSchedulesPanel").addEventListener("click", event => {
   const button = event.target.closest("[data-view-saved-schedule]");
