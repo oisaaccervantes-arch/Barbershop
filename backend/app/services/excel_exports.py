@@ -13,7 +13,7 @@ from app.models.cash_shift import CashShift
 from app.models.receptionist import Receptionist
 
 
-DAYS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+DAYS = ["Sábado", "Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
 SHIFT_LABELS = {"MORNING": "Matutino", "EVENING": "Vespertino"}
 STATUS_LABELS = {"PENDING": "Pendiente", "PRESENT": "Asistió", "ABSENT": "Falta", "REST": "Descanso", "PERMISSION": "Permiso"}
 DARK = "2B2118"
@@ -135,7 +135,8 @@ def export_attendance(db: Session, week_start: date) -> bytes:
     people: dict[tuple[str, int, str], dict[int, AttendanceRecord]] = {}
     for record in records:
         key = (record.person_type, record.person_id, record.shift.shift_type)
-        people.setdefault(key, {})[record.shift.business_date.weekday()] = record
+        day_index = (record.shift.business_date.weekday() - 5) % 7
+        people.setdefault(key, {})[day_index] = record
     for (person_type, _person_id, shift_type), days in people.items():
         first = next(iter(days.values()))
         values = [f"{first.person_name}\n{'Barbero' if person_type == 'BARBER' else 'Recepción'} · {SHIFT_LABELS.get(shift_type, shift_type)}"]

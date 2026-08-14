@@ -102,11 +102,12 @@ def serialize_shift(shift: CashShift, db: Session) -> dict:
 
 
 def schedule_for(db: Session, person_type: str, person_id: int, shift: CashShift):
+    day_index = (shift.business_date.weekday() - 5) % 7
     return db.scalar(select(WorkSchedule).where(
         WorkSchedule.person_type == person_type,
         WorkSchedule.person_id == person_id,
-        WorkSchedule.week_start == shift.business_date - timedelta(days=shift.business_date.weekday()),
-        WorkSchedule.day_of_week == shift.business_date.weekday(),
+        WorkSchedule.week_start == shift.business_date - timedelta(days=day_index),
+        WorkSchedule.day_of_week == day_index,
         WorkSchedule.shift_type == shift.shift_type,
     ))
 
@@ -147,11 +148,12 @@ def attendance_record(db: Session, shift: CashShift, person_type: str, employee)
 
 
 def works_evening(db: Session, row: AttendanceRecord, shift: CashShift) -> bool:
+    day_index = (shift.business_date.weekday() - 5) % 7
     evening = db.scalar(select(WorkSchedule.id).where(
         WorkSchedule.person_type == row.person_type,
         WorkSchedule.person_id == row.person_id,
-        WorkSchedule.week_start == shift.business_date - timedelta(days=shift.business_date.weekday()),
-        WorkSchedule.day_of_week == shift.business_date.weekday(),
+        WorkSchedule.week_start == shift.business_date - timedelta(days=day_index),
+        WorkSchedule.day_of_week == day_index,
         WorkSchedule.shift_type == "EVENING",
         WorkSchedule.status == "WORK",
     ))

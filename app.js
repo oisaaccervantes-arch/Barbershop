@@ -1045,8 +1045,8 @@ function applyScheduledStaffToOpenShift() {
   const form = $("#openShiftForm");
   const businessDate = todayISO();
   const date = new Date(`${businessDate}T12:00:00`);
-  const weekStart = mondayIso(date);
-  const dayOfWeek = (date.getDay() + 6) % 7;
+  const weekStart = businessWeekStartIso(date);
+  const dayOfWeek = (date.getDay() + 1) % 7;
   const scheduled = workSchedules.filter(item =>
     String(item.week_start).slice(0, 10) === weekStart &&
     item.shift_type === form.shiftType.value &&
@@ -1532,7 +1532,7 @@ const attendanceStatusLabels = {
   PENDING: "Pendiente", PRESENT: "Asistió", ABSENT: "Falta",
   REST: "Descanso", PERMISSION: "Permiso"
 };
-const weekDayLabels = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+const weekDayLabels = ["Sábado", "Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
 const shiftTypeLabels = { MORNING: "Matutino", EVENING: "Vespertino" };
 
 function attendanceTime(value) {
@@ -1546,18 +1546,18 @@ function localDateTimeInput(value) {
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
-function mondayIso(date = new Date()) {
+function businessWeekStartIso(date = new Date()) {
   const value = new Date(date);
   value.setHours(12, 0, 0, 0);
-  value.setDate(value.getDate() - ((value.getDay() + 6) % 7));
+  value.setDate(value.getDate() - ((value.getDay() + 1) % 7));
   return dateToLocalISO(value);
 }
 
 function normalizeSelectedWeekStart(value) {
   const date = new Date(`${value}T12:00:00`);
   if (Number.isNaN(date.getTime())) return value;
-  const daysUntilMonday = (8 - date.getDay()) % 7;
-  date.setDate(date.getDate() + daysUntilMonday);
+  const daysUntilSaturday = (6 - date.getDay() + 7) % 7;
+  date.setDate(date.getDate() + daysUntilSaturday);
   return dateToLocalISO(date);
 }
 
@@ -1614,7 +1614,7 @@ function scheduleCell(person, dayIndex, schedule) {
 
 function renderWeeklySchedule() {
   const form = $("#scheduleForm");
-  if (!form.weekStart.value) form.weekStart.value = mondayIso();
+  if (!form.weekStart.value) form.weekStart.value = businessWeekStartIso();
   form.weekStart.value = normalizeSelectedWeekStart(form.weekStart.value);
   const selectedWeek = form.weekStart.value;
   const selectedShift = form.shiftType.value;
@@ -1719,7 +1719,7 @@ function renderAttendance() {
 
   const attendanceWeeks = new Map();
   attendanceHistory.forEach(record => {
-    const week = mondayIso(new Date(`${record.business_date}T12:00:00`));
+    const week = businessWeekStartIso(new Date(`${record.business_date}T12:00:00`));
     if (!attendanceWeeks.has(week)) attendanceWeeks.set(week, []);
     attendanceWeeks.get(week).push(record);
   });
@@ -1737,7 +1737,7 @@ function renderAttendance() {
           name: record.person_name, personType: record.person_type,
           shiftType: record.shift_type, days: new Map()
         });
-        const dayIndex = (new Date(`${record.business_date}T12:00:00`).getDay() + 6) % 7;
+        const dayIndex = (new Date(`${record.business_date}T12:00:00`).getDay() + 1) % 7;
         matrixRows.get(key).days.set(dayIndex, record);
       });
       const dayHeaders = weekDayLabels.map((day, dayIndex) => {
@@ -2571,7 +2571,7 @@ $("#scheduleForm").weekStart.addEventListener("change", event => {
   const selected = event.currentTarget.value;
   const normalized = normalizeSelectedWeekStart(selected);
   event.currentTarget.value = normalized;
-  if (selected && selected !== normalized) showToast(`La semana se ajustó al ${formatAppointmentDate(normalized)}`);
+  if (selected && selected !== normalized) showToast(`La semana se ajustó al sábado ${formatAppointmentDate(normalized)}`);
   renderWeeklySchedule();
 });
 $("#scheduleForm").shiftType.addEventListener("change", renderWeeklySchedule);

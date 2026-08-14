@@ -22,8 +22,8 @@ class WorkScheduleWrite(BaseModel):
 
     @model_validator(mode="after")
     def validate_times(self):
-        if self.week_start.weekday() != 0:
-            raise ValueError("La semana debe iniciar en lunes")
+        if self.week_start.weekday() != 5:
+            raise ValueError("La semana debe iniciar en sábado")
         if self.status == "WORK" and (self.start_time is None or self.end_time is None):
             raise ValueError("Un día de trabajo requiere hora de entrada y salida")
         return self
@@ -41,8 +41,8 @@ class WorkScheduleWeekWrite(BaseModel):
 
     @model_validator(mode="after")
     def validate_week_start(self):
-        if self.week_start.weekday() != 0:
-            raise ValueError("La semana debe iniciar en lunes")
+        if self.week_start.weekday() != 5:
+            raise ValueError("La semana debe iniciar en sábado")
         return self
 
 
