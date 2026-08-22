@@ -42,6 +42,20 @@ class SaleCancel(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
 
 
+class SaleReceiptCorrectionCreate(BaseModel):
+    receipt_number: int = Field(ge=0, le=10_000)
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class SaleReceiptCorrectionRead(BaseModel):
+    id: int
+    old_receipt_number: int
+    new_receipt_number: int
+    reason: str
+    corrected_by_name: str | None
+    corrected_at: datetime
+
+
 class SaleItemRead(BaseModel):
     id: int
     service_id: int
@@ -80,3 +94,4 @@ class SaleRead(BaseModel):
     sold_at: datetime
     items: list[SaleItemRead]
     payments: list[PaymentRead]
+    receipt_corrections: list[SaleReceiptCorrectionRead] = Field(default_factory=list)

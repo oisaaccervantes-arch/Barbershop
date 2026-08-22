@@ -3,7 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
@@ -13,27 +13,20 @@ from app.models.appointment import Appointment
 from app.models.barber import Barber
 from app.models.customer import Customer
 from app.models.cash_shift import CashShift, ShiftBarber
-from app.models.sale import Payment, Sale, SaleItem
+from app.models.sale import Payment, Sale, SaleItem, SaleReceiptCorrection
 from app.models.service import Service
-from app.schemas.sale import PaymentMethod, SaleCancel, SaleCreate, SaleRead
+from app.schemas.sale import (
+    PaymentMethod,
+    SaleCancel,
+    SaleCreate,
+    SaleRead,
+    SaleReceiptCorrectionCreate,
+)
 
 
 router = APIRouter(prefix="/api/sales", tags=["sales"])
 DatabaseSession = Annotated[Session, Depends(get_db)]
 MONEY_UNIT = Decimal("0.01")
-MAX_RECEIPT_NUMBER = 10_000
-
-
-def expected_shift_receipt_number(db: Session, shift: CashShift) -> int:
-    last_number = db.scalar(
-        select(Sale.receipt_number)
-        .where(Sale.shift_id == shift.id, Sale.receipt_number.is_not(None))
-        .order_by(Sale.sold_at.desc(), Sale.id.desc())
-        .limit(1)
-    )
-    if last_number is None:
-        return shift.starting_receipt_number
-    return 0 if last_number >= MAX_RECEIPT_NUMBER else last_number + 1
 
 
 def serialize_sale(sale: Sale) -> dict:
@@ -77,6 +70,19 @@ def serialize_sale(sale: Sale) -> dict:
             }
             for payment in sale.payments
         ],
+        "receipt_corrections": [
+            {
+                "id": correction.id,
+                "old_receipt_number": correction.old_receipt_number,
+                "new_receipt_number": correction.new_receipt_number,
+                "reason": correction.reason,
+                "corrected_by_name": correction.corrected_by.full_name
+                if correction.corrected_by
+                else None,
+                "corrected_at": correction.corrected_at,
+            }
+            for correction in sale.receipt_corrections
+        ],
     }
 
 
@@ -86,6 +92,9 @@ def sale_query():
         joinedload(Sale.barber),
         joinedload(Sale.items),
         joinedload(Sale.payments),
+        joinedload(Sale.receipt_corrections).joinedload(
+            SaleReceiptCorrection.corrected_by
+        ),
     )
 
 
@@ -119,6 +128,64 @@ def cancel_sale(sale_id: int, payload: SaleCancel, db: DatabaseSession):
     return serialize_sale(saved_sale)
 
 
+@router.patch("/{sale_id}/receipt-number", response_model=SaleRead)
+def correct_receipt_number(
+    sale_id: int,
+    payload: SaleReceiptCorrectionCreate,
+    request: Request,
+    db: DatabaseSession,
+):
+    if request.state.user.role not in {"ADMIN", "RECEPTION"}:
+        raise HTTPException(status_code=403, detail="No tienes permiso para corregir folios")
+
+    sale = db.scalar(sale_query().where(Sale.id == sale_id))
+    if sale is None:
+        raise HTTPException(status_code=404, detail="La venta no existe")
+    if sale.receipt_number is None:
+        raise HTTPException(status_code=409, detail="La venta no tiene un folio corregible")
+    if payload.receipt_number == sale.receipt_number:
+        raise HTTPException(status_code=409, detail="El folio nuevo es igual al actual")
+
+    reason = " ".join(payload.reason.split())
+    if len(reason) < 3:
+        raise HTTPException(status_code=400, detail="Escribe el motivo de la corrección")
+
+    duplicate_receipt = db.scalar(
+        select(Sale.id).where(
+            Sale.shift_id == sale.shift_id,
+            Sale.receipt_number == payload.receipt_number,
+            Sale.id != sale.id,
+        )
+    )
+    if duplicate_receipt is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Ese folio ya fue utilizado en el mismo turno",
+        )
+
+    old_receipt_number = sale.receipt_number
+    sale.receipt_number = payload.receipt_number
+    sale.receipt_corrections.append(
+        SaleReceiptCorrection(
+            old_receipt_number=old_receipt_number,
+            new_receipt_number=payload.receipt_number,
+            reason=reason,
+            corrected_by_user_id=request.state.user.id,
+        )
+    )
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Ese folio ya fue utilizado en el mismo turno",
+        ) from exc
+
+    saved_sale = db.scalar(sale_query().where(Sale.id == sale.id))
+    return serialize_sale(saved_sale)
+
+
 @router.post("", response_model=SaleRead, status_code=status.HTTP_201_CREATED)
 def create_sale(payload: SaleCreate, db: DatabaseSession):
     customer = db.get(Customer, payload.customer_id) if payload.customer_id else None
@@ -131,12 +198,6 @@ def create_sale(payload: SaleCreate, db: DatabaseSession):
     shift = db.get(CashShift, payload.shift_id)
     if shift is None or shift.status != "OPEN":
         raise HTTPException(status_code=400, detail="El turno no está abierto")
-    expected_receipt = expected_shift_receipt_number(db, shift)
-    if payload.receipt_number != expected_receipt:
-        raise HTTPException(
-            status_code=409,
-            detail=f"El folio esperado para esta venta es {expected_receipt}",
-        )
     barber_in_shift = db.scalar(
         select(ShiftBarber.id).where(
             ShiftBarber.shift_id == shift.id,

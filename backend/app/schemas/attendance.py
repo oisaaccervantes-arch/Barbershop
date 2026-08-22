@@ -60,6 +60,11 @@ class AttendanceCorrection(BaseModel):
     notes: str | None = Field(default=None, max_length=500)
 
 
+class CurrentShiftPersonAdd(BaseModel):
+    person_type: PersonType
+    person_id: int
+
+
 class AttendanceRead(BaseModel):
     id: int
     shift_id: int
@@ -80,4 +85,6 @@ class AttendanceRead(BaseModel):
     continued_from_record_id: int | None
     recorded_by_name: str | None
     corrected_by_name: str | None
+    added_by_name: str | None
+    added_at: datetime | None
     complete: bool

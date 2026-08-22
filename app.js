@@ -273,6 +273,13 @@ function mapSaleFromApi(sale) {
     status: sale.status || "COMPLETED",
     cancellationReason: sale.cancellation_reason || "",
     cancelledAt: sale.cancelled_at || null,
+    receiptCorrections: (sale.receipt_corrections || []).map(correction => ({
+      oldReceiptNumber: correction.old_receipt_number,
+      newReceiptNumber: correction.new_receipt_number,
+      reason: correction.reason,
+      correctedByName: correction.corrected_by_name || "Usuario eliminado",
+      correctedAt: correction.corrected_at
+    })),
     payment: sale.payments.length > 1
       ? "Mixto"
       : paymentMethodLabels[sale.payments[0]?.method] || "Sin pago",
@@ -1464,7 +1471,13 @@ function renderSalesReport() {
   $("#salesReportRows").innerHTML = matchingSales.map(sale => `
     <tr class="${sale.status === "CANCELLED" ? "cancelled-sale" : ""}">
       <td>${sale.date}<br><small>${sale.time}</small></td>
-      <td><strong>${sale.receiptNumber ?? escapeHtml((sale.folio || sale.id).slice(0, 8).toUpperCase())}</strong></td>
+      <td>
+        <strong>${sale.receiptNumber ?? escapeHtml((sale.folio || sale.id).slice(0, 8).toUpperCase())}</strong>
+        ${sale.receiptCorrections?.length ? (() => {
+          const correction = sale.receiptCorrections.at(-1);
+          return `<small class="receipt-correction-note">Antes ${correction.oldReceiptNumber} · ${escapeHtml(correction.correctedByName)}</small>`;
+        })() : ""}
+      </td>
       <td>${escapeHtml(sale.customer || "Público general")}</td>
       <td>${sale.items.map(item =>
         `${item.quantity > 1 ? `${item.quantity} × ` : ""}${escapeHtml(item.name)}`
@@ -1478,6 +1491,9 @@ function renderSalesReport() {
           : ""}
       </td>
       <td>
+        ${["ADMIN", "RECEPTION"].includes(authenticatedUser?.role) ? `
+          <button class="chip-button" type="button" data-correct-sale-receipt="${sale.id}">Corregir folio</button>
+        ` : ""}
         ${sale.status === "COMPLETED" ? `
           <button class="chip-button danger" type="button" data-cancel-sale="${sale.id}">Cancelar</button>
         ` : `<span class="status cancelada">cancelada</span>`}
@@ -1685,6 +1701,7 @@ function renderAttendance() {
   $("#attendanceShiftLabel").textContent = currentShift
     ? `${shiftTypeLabels[currentShift.shift_type]} · ${currentShift.business_date}`
     : "Abre un turno para comenzar a registrar.";
+  renderCurrentShiftPersonForm();
   $("#attendanceCurrentRows").innerHTML = currentAttendance.map(record => {
     const canClockIn = record.status === "PENDING" && !record.clock_in;
     const canMealOut = record.clock_in && !record.meal_out && !record.clock_out;
@@ -1711,7 +1728,7 @@ function renderAttendance() {
           ${canClockIn ? `<button class="secondary-button compact" data-attendance-event="ABSENT" data-record-id="${record.id}">Falta</button><button class="secondary-button compact" data-attendance-event="PERMISSION" data-record-id="${record.id}">Permiso</button>` : ""}
           ${authenticatedUser?.role === "ADMIN" ? `<button class="secondary-button compact" data-correct-attendance="${record.id}">Corregir</button>` : ""}
         </div>
-        ${record.recorded_by_name || record.corrected_by_name ? `<p class="attendance-audit">${record.recorded_by_name ? `Último registro: <strong>${escapeHtml(record.recorded_by_name)}</strong>` : ""}${record.corrected_by_name ? `${record.recorded_by_name ? " · " : ""}Corrección: <strong>${escapeHtml(record.corrected_by_name)}</strong>` : ""}</p>` : ""}
+        ${record.added_by_name || record.recorded_by_name || record.corrected_by_name ? `<p class="attendance-audit">${record.added_by_name ? `Agregado al turno por <strong>${escapeHtml(record.added_by_name)}</strong>` : ""}${record.recorded_by_name ? `${record.added_by_name ? " · " : ""}Último registro: <strong>${escapeHtml(record.recorded_by_name)}</strong>` : ""}${record.corrected_by_name ? `${record.added_by_name || record.recorded_by_name ? " · " : ""}Corrección: <strong>${escapeHtml(record.corrected_by_name)}</strong>` : ""}</p>` : ""}
       </article>`;
   }).join("") || `<div class="cart-empty">No hay personal en un turno abierto.</div>`;
 
@@ -1790,6 +1807,28 @@ function renderAttendance() {
         ${shiftMatrix("EVENING", "Turno vespertino")}
       </details>`;
     }).join("") || `<div class="cart-empty">Todavía no hay asistencias registradas.</div>`;
+}
+
+function renderCurrentShiftPersonForm() {
+  const form = $("#addShiftPersonForm");
+  if (!form) return;
+  const allowed = currentShift && ["ADMIN", "RECEPTION"].includes(authenticatedUser?.role);
+  form.classList.toggle("hidden", !allowed);
+  if (!allowed) return;
+
+  const type = form.personType.value || "BARBER";
+  const assigned = new Set(currentAttendance
+    .filter(record => record.person_type === type)
+    .map(record => String(record.person_id)));
+  const people = (type === "BARBER" ? catalogBarbers : catalogReceptionists)
+    .filter(person => person.active && !assigned.has(String(person.id)));
+  const previous = form.personId.value;
+  form.personId.innerHTML = people.length
+    ? people.map(person => `<option value="${person.id}">${escapeHtml(person.name)}</option>`).join("")
+    : `<option value="">No hay personal disponible</option>`;
+  if (people.some(person => String(person.id) === previous)) form.personId.value = previous;
+  form.personId.disabled = !people.length;
+  form.querySelector('button[type="submit"]').disabled = !people.length;
 }
 
 function renderAll() {
@@ -2029,6 +2068,26 @@ document.addEventListener("click", async event => {
     $("#saleCancellationForm").reset();
     $("#saleCancellationModal").classList.remove("hidden");
     $("#saleCancellationForm").reason.focus();
+  }
+
+  const correctSaleReceipt = event.target.closest("[data-correct-sale-receipt]");
+  if (correctSaleReceipt) {
+    const sale = state.sales.find(item => item.id === correctSaleReceipt.dataset.correctSaleReceipt);
+    if (!sale) return;
+    const form = $("#saleReceiptCorrectionForm");
+    form.reset();
+    form.dataset.saleId = sale.id;
+    form.receiptNumber.value = sale.receiptNumber ?? "";
+    $("#saleReceiptCorrectionLabel").textContent =
+      `Folio actual ${sale.receiptNumber ?? "—"} · ${sale.customer || "Público general"} · ${money(sale.total)}`;
+    $("#saleReceiptCorrectionHistory").innerHTML = sale.receiptCorrections?.length
+      ? `<strong>Correcciones anteriores</strong>${sale.receiptCorrections.slice().reverse().map(correction => `
+          <p>${correction.oldReceiptNumber} → ${correction.newReceiptNumber}<br>
+          <small>${escapeHtml(correction.reason)} · ${escapeHtml(correction.correctedByName)}</small></p>
+        `).join("")}`
+      : "";
+    $("#saleReceiptCorrectionModal").classList.remove("hidden");
+    form.receiptNumber.select();
   }
 
   const toggleShift = event.target.closest("[data-toggle-shift]");
@@ -2533,6 +2592,44 @@ $("#saleCancellationForm").addEventListener("submit", async event => {
     submitButton.disabled = false;
   }
 });
+
+function closeSaleReceiptCorrectionModal() {
+  $("#saleReceiptCorrectionForm").reset();
+  $("#saleReceiptCorrectionModal").classList.add("hidden");
+  delete $("#saleReceiptCorrectionForm").dataset.saleId;
+}
+
+$("#closeSaleReceiptCorrectionModal").addEventListener("click", closeSaleReceiptCorrectionModal);
+$("#cancelSaleReceiptCorrectionModal").addEventListener("click", closeSaleReceiptCorrectionModal);
+$("#saleReceiptCorrectionForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const saleId = form.dataset.saleId;
+  const receiptNumber = Number(form.receiptNumber.value);
+  const reason = form.reason.value.trim();
+  if (!saleId || !reason) return;
+  const submitButton = form.querySelector('button[type="submit"]');
+  submitButton.disabled = true;
+  try {
+    const response = await fetch(`${API_BASE_URL}/sales/${saleId}/receipt-number`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ receipt_number: receiptNumber, reason })
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.detail || "No fue posible corregir el folio");
+    }
+    await Promise.all([loadSalesFromApi(), loadCurrentShiftFromApi(), loadShiftHistoryFromApi()]);
+    closeSaleReceiptCorrectionModal();
+    renderAll();
+    showToast("Folio corregido; el cambio quedó registrado");
+  } catch (error) {
+    showToast(error.message || "No fue posible corregir el folio");
+  } finally {
+    submitButton.disabled = false;
+  }
+});
 $("#goToCancellations").addEventListener("click", () =>
   $(".cancellations-panel").scrollIntoView({ behavior: "smooth", block: "start" })
 );
@@ -2784,6 +2881,34 @@ $("#attendanceCorrectionForm").addEventListener("submit", async event => {
     showToast("Asistencia corregida");
   } catch (error) {
     showToast(error.message);
+  }
+});
+
+$("#addShiftPersonForm").personType.addEventListener("change", renderCurrentShiftPersonForm);
+$("#addShiftPersonForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  if (!currentShift || !form.personId.value) return;
+  button.disabled = true;
+  try {
+    const response = await fetch(`${API_BASE_URL}/attendance/current/person`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        person_type: form.personType.value,
+        person_id: Number(form.personId.value)
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "No fue posible agregar al personal");
+    await Promise.all([loadCurrentShiftFromApi(), loadAttendanceFromApi()]);
+    renderAll();
+    showToast(`${result.person_name} fue agregado al turno actual`);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
   }
 });
 

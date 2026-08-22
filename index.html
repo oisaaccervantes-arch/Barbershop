@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260822-2">
 </head>
 <body>
   <div class="login-screen" id="loginScreen">
@@ -245,6 +245,7 @@
           <label>Folio de la nota
             <input name="receiptNumber" type="number" inputmode="numeric"
               min="0" max="10000" placeholder="Abre un turno" required>
+            <small class="field-help">El sistema sugiere uno, pero puedes cambiarlo si las notas se cobran fuera de orden.</small>
           </label>
           <label>Teléfono del cliente
             <input name="phone" list="customerPhoneOptions" inputmode="numeric" maxlength="10"
@@ -606,6 +607,22 @@
               <p class="muted" id="attendanceShiftLabel">Abre un turno para comenzar a registrar.</p>
             </div>
           </div>
+          <form class="attendance-add-person hidden" id="addShiftPersonForm">
+            <div>
+              <strong>Agregar personal de último momento</strong>
+              <small>Solo se agregará al turno actual; el horario semanal no cambiará.</small>
+            </div>
+            <label>Tipo
+              <select name="personType">
+                <option value="BARBER">Barbero</option>
+                <option value="RECEPTIONIST">Recepción</option>
+              </select>
+            </label>
+            <label>Personal
+              <select name="personId" required></select>
+            </label>
+            <button class="secondary-button" type="submit">Agregar al turno</button>
+          </form>
           <div class="attendance-cards" id="attendanceCurrentRows"></div>
         </div>
 
@@ -1006,6 +1023,33 @@
     </form>
   </div>
 
+  <div class="modal-backdrop hidden" id="saleReceiptCorrectionModal">
+    <form class="modal-card" id="saleReceiptCorrectionForm">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Ventas</p>
+          <h3>Corregir folio</h3>
+        </div>
+        <button class="icon-button" id="closeSaleReceiptCorrectionModal" type="button" title="Cerrar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <p id="saleReceiptCorrectionLabel"></p>
+      <label>Folio correcto
+        <input name="receiptNumber" type="number" inputmode="numeric" min="0" max="10000" required>
+      </label>
+      <label>Motivo de la corrección
+        <textarea name="reason" minlength="3" maxlength="500" rows="4"
+          placeholder="Ej. La nota física corresponde al folio 0013" required></textarea>
+      </label>
+      <div class="receipt-correction-history" id="saleReceiptCorrectionHistory"></div>
+      <div class="modal-actions">
+        <button class="secondary-button" id="cancelSaleReceiptCorrectionModal" type="button">Volver</button>
+        <button class="submit-button" type="submit">Guardar corrección</button>
+      </div>
+    </form>
+  </div>
+
   <div class="modal-backdrop hidden" id="helpModal">
     <div class="modal-card help-modal-card">
       <div class="panel-header">
@@ -1031,7 +1075,7 @@
         <details open><summary><span>1</span> Abrir el turno</summary><p>En <strong>Corte de turno</strong>, verifica si abrirás Matutino o Vespertino. El sistema selecciona automáticamente la recepcionista y los barberos programados para ese día, pero puedes modificarlos antes de abrir. Captura también el fondo inicial y revisa el folio sugerido.</p></details>
         <details><summary><span>2</span> Registrar asistencias</summary><p>En <strong>Checador</strong>, registra entrada, salida y comida del personal. Para marcar falta o permiso deberás confirmarlo. Si una persona está programada en ambos turnos, el matutino conservará su entrada y la jornada continuará automáticamente en el vespertino; registra su salida final hasta que termine de trabajar.</p></details>
         <details><summary><span>3</span> Agendar y confirmar citas</summary><p>Captura teléfono, nombre, fecha y hora. El barbero y los servicios pueden quedar pendientes. Al confirmar, completa esos datos; se permiten varios servicios y se evitan citas simultáneas para el mismo barbero.</p></details>
-        <details><summary><span>4</span> Cobrar servicios</summary><p>Desde una cita usa <strong>Cobrar</strong>, o entra directamente a <strong>Caja</strong> para una venta sin cita. Selecciona cliente opcional, barbero, servicios y método de pago. Si hoy es el cumpleaños registrado del cliente, puedes activar 50 % de descuento sobre todos los servicios de la venta. Verifica el folio antes de confirmar.</p></details>
+        <details><summary><span>4</span> Cobrar servicios</summary><p>Desde una cita usa <strong>Cobrar</strong>, o entra directamente a <strong>Caja</strong> para una venta sin cita. Selecciona cliente opcional, barbero, servicios y método de pago. Si hoy es el cumpleaños registrado del cliente, puedes activar 50 % de descuento sobre todos los servicios de la venta. Verifica el folio antes de confirmar. Si la nota quedó con un folio incorrecto, administración o recepción puede corregirlo desde <strong>Ventas</strong>; el motivo y el usuario quedan registrados.</p></details>
         <details><summary><span>5</span> Registrar gastos y revisar ventas</summary><p>Los gastos del turno se capturan en <strong>Corte de turno</strong>. En <strong>Ventas</strong> puedes filtrar por fechas o barbero, consultar gráficas, movimientos, neto después de gastos y motivos de cancelación.</p></details>
         <details><summary><span>6</span> Adjuntar evidencia del checador</summary><p>Antes de capturar el conteo real, descarga desde WhatsApp Web la fotografía del checador. En <strong>Corte de turno</strong>, elige la imagen y presiona <strong>Subir evidencia</strong>. Al guardarse se habilitarán los campos del corte. Comprueba la miniatura; puedes reemplazarla mientras el turno esté abierto.</p></details>
         <details><summary><span>7</span> Cerrar el turno</summary><p>Después de adjuntar la evidencia, registra efectivo entregado, corte de terminal, transferencias verificadas y notas opcionales. Revisa las diferencias. Para cerrar deben estar completas las asistencias; en el matutino no se exige salida a quien tenga horario vespertino porque su jornada continúa. El sistema guarda quién subió la foto y quién cerró.</p></details>
@@ -1045,6 +1089,6 @@
 
   <div class="toast" id="toast"></div>
   <datalist id="customerPhoneOptions"></datalist>
-  <script src="app.js"></script>
+  <script src="app.js?v=20260822-2"></script>
 </body>
 </html>

@@ -45,18 +45,30 @@ def next_global_receipt_number(db: Session) -> int | None:
 
 
 def next_receipt_number(db: Session, shift: CashShift) -> int:
-    last_number = db.scalar(
+    receipt_numbers = db.scalars(
         select(Sale.receipt_number)
         .where(
             Sale.shift_id == shift.id,
             Sale.receipt_number.is_not(None),
         )
         .order_by(Sale.sold_at.desc(), Sale.id.desc())
-        .limit(1)
-    )
-    if last_number is None:
+    ).all()
+    if not receipt_numbers:
         return shift.starting_receipt_number
-    return 0 if last_number >= MAX_RECEIPT_NUMBER else last_number + 1
+
+    used_numbers = set(receipt_numbers)
+    candidate = (
+        0 if receipt_numbers[0] >= MAX_RECEIPT_NUMBER else receipt_numbers[0] + 1
+    )
+    for _ in range(MAX_RECEIPT_NUMBER + 1):
+        if candidate not in used_numbers:
+            return candidate
+        candidate = 0 if candidate >= MAX_RECEIPT_NUMBER else candidate + 1
+
+    raise HTTPException(
+        status_code=409,
+        detail="Ya se utilizaron todos los folios disponibles en este turno",
+    )
 
 
 def shift_query():

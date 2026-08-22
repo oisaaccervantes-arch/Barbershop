@@ -82,6 +82,33 @@ class Sale(Base):
     payments = relationship(
         "Payment", back_populates="sale", cascade="all, delete-orphan"
     )
+    receipt_corrections = relationship(
+        "SaleReceiptCorrection",
+        back_populates="sale",
+        cascade="all, delete-orphan",
+        order_by="SaleReceiptCorrection.corrected_at",
+    )
+
+
+class SaleReceiptCorrection(Base):
+    __tablename__ = "sale_receipt_corrections"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    sale_id: Mapped[int] = mapped_column(
+        ForeignKey("sales.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    old_receipt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    new_receipt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    corrected_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    corrected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    sale = relationship("Sale", back_populates="receipt_corrections")
+    corrected_by = relationship("User")
 
 
 class SaleItem(Base):

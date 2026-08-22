@@ -59,9 +59,12 @@ class AttendanceRecord(Base):
     )
     recorded_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     corrected_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    added_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     shift = relationship("CashShift", back_populates="attendance_records")
     recorded_by = relationship("User", foreign_keys=[recorded_by_user_id])
     corrected_by = relationship("User", foreign_keys=[corrected_by_user_id])
+    added_by = relationship("User", foreign_keys=[added_by_user_id])

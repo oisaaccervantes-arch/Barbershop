@@ -11,9 +11,9 @@ from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.models.attendance import AttendanceRecord, WorkSchedule
 from app.models.barber import Barber
-from app.models.cash_shift import CashShift
+from app.models.cash_shift import CashShift, ShiftBarber
 from app.models.receptionist import Receptionist
-from app.schemas.attendance import AttendanceCorrection, AttendanceEvent, AttendanceRead, WorkScheduleRead, WorkScheduleWeekWrite, WorkScheduleWrite
+from app.schemas.attendance import AttendanceCorrection, AttendanceEvent, AttendanceRead, CurrentShiftPersonAdd, WorkScheduleRead, WorkScheduleWeekWrite, WorkScheduleWrite
 from app.services.excel_exports import export_attendance, export_schedule
 
 
@@ -25,6 +25,12 @@ LOCAL_ZONE = ZoneInfo("America/Hermosillo")
 def require_admin(request: Request):
     if request.state.user.role != "ADMIN":
         raise HTTPException(status_code=403, detail="Se requiere acceso de administración")
+    return request.state.user
+
+
+def require_operations_user(request: Request):
+    if request.state.user.role not in {"ADMIN", "RECEPTION"}:
+        raise HTTPException(status_code=403, detail="Solo administración o recepción pueden agregar personal al turno")
     return request.state.user
 
 
@@ -63,6 +69,8 @@ def serialize_attendance(row: AttendanceRecord) -> dict:
         "continued_from_record_id": row.continued_from_record_id,
         "recorded_by_name": row.recorded_by.full_name if row.recorded_by else None,
         "corrected_by_name": row.corrected_by.full_name if row.corrected_by else None,
+        "added_by_name": row.added_by.full_name if row.added_by else None,
+        "added_at": row.added_at,
         "complete": attendance_complete(row),
     }
 
@@ -72,6 +80,7 @@ def attendance_query():
         joinedload(AttendanceRecord.shift),
         joinedload(AttendanceRecord.recorded_by),
         joinedload(AttendanceRecord.corrected_by),
+        joinedload(AttendanceRecord.added_by),
     )
 
 
@@ -98,6 +107,44 @@ def attendance_history(db: DatabaseSession):
         .limit(500)
     ).all()
     return [serialize_attendance(row) for row in rows]
+
+
+@router.post("/current/person", response_model=AttendanceRead, status_code=status.HTTP_201_CREATED)
+def add_current_shift_person(payload: CurrentShiftPersonAdd, request: Request, db: DatabaseSession):
+    user = require_operations_user(request)
+    shift = db.scalar(select(CashShift).where(CashShift.status == "OPEN").order_by(CashShift.id.desc()))
+    if shift is None:
+        raise HTTPException(status_code=409, detail="No hay un turno abierto")
+
+    employee = person(db, payload.person_type, payload.person_id)
+    existing = db.scalar(select(AttendanceRecord.id).where(
+        AttendanceRecord.shift_id == shift.id,
+        AttendanceRecord.person_type == payload.person_type,
+        AttendanceRecord.person_id == payload.person_id,
+    ))
+    if existing:
+        raise HTTPException(status_code=409, detail="Esta persona ya pertenece al turno actual")
+
+    row = AttendanceRecord(
+        shift_id=shift.id,
+        person_type=payload.person_type,
+        person_id=employee.id,
+        person_name=employee.name,
+        status="PENDING",
+        added_by_user_id=user.id,
+        added_at=datetime.now(LOCAL_ZONE),
+    )
+    db.add(row)
+    if payload.person_type == "BARBER":
+        already_assigned = db.scalar(select(ShiftBarber.id).where(
+            ShiftBarber.shift_id == shift.id,
+            ShiftBarber.barber_id == employee.id,
+        ))
+        if not already_assigned:
+            db.add(ShiftBarber(shift_id=shift.id, barber_id=employee.id))
+    db.commit()
+    saved = db.scalar(attendance_query().where(AttendanceRecord.id == row.id))
+    return serialize_attendance(saved)
 
 
 def excel_response(content: bytes, filename: str):
