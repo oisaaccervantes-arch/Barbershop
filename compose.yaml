@@ -21,7 +21,7 @@ services:
     volumes:
       - bizantino_evidence:/data/shift_evidence
     networks:
-      - default
+      default: {}
       caddy:
         aliases:
           - bizantino-api
