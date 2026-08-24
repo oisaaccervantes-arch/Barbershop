@@ -28,11 +28,11 @@ al repositorio ni al paquete compartido.
 cd /opt/bizantino
 cp .env.production.example .env
 docker compose config
-docker compose build --no-cache app
+docker compose build --no-cache bizantino-api
 docker compose up -d
 docker compose ps
-docker compose logs --tail=100 app
-docker compose exec app python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/api/health/database').read().decode())"
+docker compose logs --tail=100 bizantino-api
+docker compose exec bizantino-api python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/api/health/database').read().decode())"
 ```
 
 El contenedor ejecuta `alembic upgrade head` antes de iniciar Uvicorn.

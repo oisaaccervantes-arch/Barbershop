@@ -1,5 +1,5 @@
 services:
-  app:
+  bizantino-api:
     build:
       context: .
     container_name: bizantino-app
@@ -22,7 +22,9 @@ services:
       - bizantino_evidence:/data/shift_evidence
     networks:
       - default
-      - caddy
+      caddy:
+        aliases:
+          - bizantino-api
 
   db:
     image: postgres:17-alpine
