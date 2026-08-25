@@ -18,6 +18,7 @@ from app.routers.receptionists import router as receptionists_router
 from app.routers.attendance import router as attendance_router
 from app.routers.users import router as users_router
 from pathlib import Path
+from types import SimpleNamespace
 
 
 app = FastAPI(
@@ -61,18 +62,27 @@ async def require_authenticated_session(request: Request, call_next):
         user = db.get(User, user_id)
         if user is None or not user.active:
             return JSONResponse(status_code=401, content={"detail": "Sesión inválida"})
-        request.state.user = user
-        if (
-            user.role == "SUPPORT"
-            and request.method not in {"GET", "HEAD", "OPTIONS"}
-            and request.url.path != "/api/auth/logout"
-        ):
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "La cuenta de soporte tiene acceso de consulta únicamente"},
-            )
-        response = await call_next(request)
-    return response
+        authenticated_user = SimpleNamespace(
+            id=user.id,
+            username=user.username,
+            full_name=user.full_name,
+            role=user.role,
+            active=user.active,
+        )
+
+    # La consulta de autenticación ya terminó y su conexión se devuelve al pool
+    # antes de que el endpoint abra su propia sesión de base de datos.
+    request.state.user = authenticated_user
+    if (
+        authenticated_user.role == "SUPPORT"
+        and request.method not in {"GET", "HEAD", "OPTIONS"}
+        and request.url.path != "/api/auth/logout"
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "La cuenta de soporte tiene acceso de consulta únicamente"},
+        )
+    return await call_next(request)
 
 
 @app.get("/")
