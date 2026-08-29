@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 .env
 *.tar.gz
+backend/local_legacy_schedules_backup.json
