@@ -32,6 +32,7 @@ class CashShift(Base):
     card_reported: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     transfer_reported: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     closing_notes: Mapped[str | None] = mapped_column(String(1000))
+    receipt_gap_reason: Mapped[str | None] = mapped_column(String(500))
     evidence_file_name: Mapped[str | None] = mapped_column(String(255))
     evidence_original_name: Mapped[str | None] = mapped_column(String(255))
     evidence_content_type: Mapped[str | None] = mapped_column(String(100))

@@ -323,7 +323,7 @@
 
     <section class="view" id="services">
       <div class="workspace two-columns">
-        <form class="panel form-panel" id="serviceForm">
+        <form class="panel form-panel" id="serviceForm" data-admin-only>
           <div class="panel-header">
             <div>
               <p class="eyebrow">Catálogo</p>
@@ -776,6 +776,12 @@
                 <textarea name="closingNotes" maxlength="1000" rows="3"
                   placeholder="Ej. Faltaron $50 y se revisará con recepción"></textarea>
               </label>
+              <div class="schedule-help hidden" id="receiptGapNotice"></div>
+              <label class="hidden" id="receiptGapReasonField">Motivo de los folios faltantes
+                <textarea name="receiptGapReason" maxlength="500" rows="3"
+                  placeholder="Ej. La nota física se canceló y no fue utilizada"></textarea>
+                <small>También puedes corregir los folios desde Ventas; si la secuencia queda completa ya no será necesario justificar.</small>
+              </label>
             </form>
           </div>
 
@@ -1078,7 +1084,7 @@
         <details><summary><span>4</span> Cobrar servicios</summary><p>Desde una cita usa <strong>Cobrar</strong>, o entra directamente a <strong>Caja</strong> para una venta sin cita. Selecciona cliente opcional, barbero, servicios y método de pago. Si hoy es el cumpleaños registrado del cliente, puedes activar 50 % de descuento sobre todos los servicios de la venta. Verifica el folio antes de confirmar. Si la nota quedó con un folio incorrecto, administración o recepción puede corregirlo desde <strong>Ventas</strong>; el motivo y el usuario quedan registrados.</p></details>
         <details><summary><span>5</span> Registrar gastos y revisar ventas</summary><p>Los gastos del turno se capturan en <strong>Corte de turno</strong>. En <strong>Ventas</strong> puedes filtrar por fechas o barbero, consultar gráficas, movimientos, neto después de gastos y motivos de cancelación.</p></details>
         <details><summary><span>6</span> Adjuntar evidencia del checador</summary><p>Antes de capturar el conteo real, descarga desde WhatsApp Web la fotografía del checador. En <strong>Corte de turno</strong>, elige la imagen y presiona <strong>Subir evidencia</strong>. Al guardarse se habilitarán los campos del corte. Comprueba la miniatura; puedes reemplazarla mientras el turno esté abierto.</p></details>
-        <details><summary><span>7</span> Cerrar el turno</summary><p>Después de adjuntar la evidencia, registra efectivo entregado, corte de terminal, transferencias verificadas y notas opcionales. Revisa las diferencias. Para cerrar deben estar completas las asistencias; en el matutino no se exige salida a quien tenga horario vespertino porque su jornada continúa. El sistema guarda quién subió la foto y quién cerró.</p></details>
+        <details><summary><span>7</span> Cerrar el turno</summary><p>Después de adjuntar la evidencia, registra efectivo entregado, corte de terminal, transferencias verificadas y notas opcionales. Revisa las diferencias. Para cerrar deben estar completas las asistencias y la secuencia de folios; si falta una nota, corrige el folio desde Ventas o registra el motivo del salto. En el matutino no se exige salida a quien tenga horario vespertino porque su jornada continúa. El sistema guarda quién subió la foto y quién cerró.</p></details>
         <details><summary><span>8</span> Consultar y exportar historial</summary><p>En turnos anteriores abre <strong>Ver desglose</strong> para consultar conciliación, gastos, producción, evidencia y responsables. En <strong>Checador</strong> las asistencias semanales aparecen separadas en Matutino y Vespertino, con entrada y salida reales; también pueden exportarse a Excel.</p></details>
       </div>
       <div class="modal-actions">

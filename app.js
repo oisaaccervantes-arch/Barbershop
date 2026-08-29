@@ -911,6 +911,7 @@ function renderServices() {
   `).join("");
 
   const catalog = catalogServices.length ? catalogServices : state.services;
+  const canManageCatalog = authenticatedUser?.role === "ADMIN";
   $("#serviceList").innerHTML = catalog.map(service => `
     <div class="price-item ${service.active === false ? "inactive" : ""}">
       <div>
@@ -919,11 +920,11 @@ function renderServices() {
       </div>
       <div class="catalog-actions">
         <strong>${money(service.price)}</strong>
-        <button class="chip-button" type="button" data-edit-service="${service.id}">Editar</button>
+        ${canManageCatalog ? `<button class="chip-button" type="button" data-edit-service="${service.id}">Editar</button>
         <button class="chip-button ${service.active === false ? "pay" : "danger"}" type="button"
           data-toggle-service="${service.id}">
           ${service.active === false ? "Activar" : "Desactivar"}
-        </button>
+        </button>` : ""}
       </div>
     </div>
   `).join("");
@@ -1120,9 +1121,19 @@ function renderShift() {
   const evidencePreview = $("#shiftEvidencePreview");
   const closeShiftButton = $("#closeShiftButton");
   const hasEvidence = Boolean(currentShift.evidence_url);
+  const missingReceipts = currentShift.missing_receipt_numbers || [];
+  const receiptGapNotice = $("#receiptGapNotice");
+  const receiptGapReasonField = $("#receiptGapReasonField");
+  receiptGapNotice.classList.toggle("hidden", !missingReceipts.length);
+  receiptGapReasonField.classList.toggle("hidden", !missingReceipts.length);
+  receiptGapNotice.textContent = missingReceipts.length
+    ? `Faltan folios: ${missingReceipts.map(number => String(number).padStart(4, "0")).join(", ")}. Corrígelos desde Ventas o escribe el motivo.`
+    : "";
+  const formReceiptGapReason = $("#closeShiftForm").receiptGapReason;
+  formReceiptGapReason.required = missingReceipts.length > 0;
   evidenceStatus.textContent = currentShift.evidence_url ? "Adjuntada" : "Pendiente";
   evidenceStatus.classList.toggle("complete", hasEvidence);
-  ["cashSalesCounted", "cardReported", "transferReported", "closingNotes"].forEach(field => {
+  ["cashSalesCounted", "cardReported", "transferReported", "closingNotes", "receiptGapReason"].forEach(field => {
     $("#closeShiftForm")[field].disabled = !hasEvidence;
   });
   $("#closeShiftForm").classList.toggle("evidence-locked", !hasEvidence);
@@ -1291,6 +1302,7 @@ function historicalShiftDetail(shift, summary) {
         `).join("") || `<p class="muted">Sin gastos registrados.</p>`}
         <div class="cut-line total"><span>Total de gastos</span><strong>${money(summary.expenses)}</strong></div>
         <div class="closing-notes"><strong>Notas del cierre</strong><p>${escapeHtml(shift.closing_notes || "Sin notas registradas.")}</p></div>
+        ${shift.receipt_gap_reason ? `<div class="closing-notes"><strong>Motivo de folios faltantes</strong><p>${escapeHtml(shift.receipt_gap_reason)}</p></div>` : ""}
         <div class="closing-notes"><strong>Evidencia del checador</strong>${shift.evidence_url
           ? `<a class="evidence-history-card" href="${apiFileUrl(shift.evidence_url)}" target="_blank" rel="noopener">
               <img src="${apiFileUrl(shift.evidence_url)}" alt="Evidencia del checador del turno">
@@ -3049,7 +3061,8 @@ $("#closeShiftForm").addEventListener("submit", async event => {
     cash_counted: roundMoney(fundReserved + cashSalesCounted),
     card_reported: Number(form.cardReported.value || 0),
     transfer_reported: Number(form.transferReported.value || 0),
-    closing_notes: form.closingNotes.value.trim() || null
+    closing_notes: form.closingNotes.value.trim() || null,
+    receipt_gap_reason: form.receiptGapReason.value.trim() || null
   };
   $("#closeShiftConfirmationSummary").innerHTML = `
     <div class="cut-line"><span>Turno</span><strong>${currentShift.shift_type === "MORNING" ? "Matutino" : "Vespertino"}</strong></div>
@@ -3060,6 +3073,7 @@ $("#closeShiftForm").addEventListener("submit", async event => {
     <div class="cut-line"><span>Transferencias</span><strong>${money(pendingCloseShiftData.transfer_reported)}</strong></div>
     <div class="cut-line total"><span>Resultado</span><strong>${$("#reconciliationResult strong").textContent}</strong></div>
     <div class="closing-notes"><strong>Notas</strong><p>${escapeHtml(pendingCloseShiftData.closing_notes || "Sin notas")}</p></div>
+    ${(currentShift.missing_receipt_numbers || []).length ? `<div class="closing-notes"><strong>Folios faltantes</strong><p>${currentShift.missing_receipt_numbers.map(number => String(number).padStart(4, "0")).join(", ")}</p><strong>Motivo</strong><p>${escapeHtml(pendingCloseShiftData.receipt_gap_reason || "Sin motivo")}</p></div>` : ""}
   `;
   $("#closeShiftModal").classList.remove("hidden");
 });

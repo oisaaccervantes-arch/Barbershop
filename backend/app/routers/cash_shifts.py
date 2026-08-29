@@ -71,6 +71,30 @@ def next_receipt_number(db: Session, shift: CashShift) -> int:
     )
 
 
+def missing_receipt_numbers(db: Session, shift: CashShift) -> list[int]:
+    """Return gaps from the shift's starting folio through its highest used folio."""
+    used_numbers = set(db.scalars(
+        select(Sale.receipt_number).where(
+            Sale.shift_id == shift.id,
+            Sale.receipt_number.is_not(None),
+        )
+    ).all())
+    if not used_numbers:
+        return []
+
+    start = shift.starting_receipt_number
+    high_numbers = [number for number in used_numbers if number >= start]
+    if not high_numbers:
+        return []
+
+    expected = set(range(start, max(high_numbers) + 1))
+    if MAX_RECEIPT_NUMBER in used_numbers:
+        low_numbers = [number for number in used_numbers if number < start]
+        if low_numbers:
+            expected.update(range(0, max(low_numbers) + 1))
+    return sorted(expected - used_numbers)
+
+
 def shift_query():
     return select(CashShift).options(
         joinedload(CashShift.barbers).joinedload(ShiftBarber.barber),
@@ -99,6 +123,8 @@ def serialize_shift(shift: CashShift, db: Session) -> dict:
         "card_reported": shift.card_reported,
         "transfer_reported": shift.transfer_reported,
         "closing_notes": shift.closing_notes,
+        "receipt_gap_reason": shift.receipt_gap_reason,
+        "missing_receipt_numbers": missing_receipt_numbers(db, shift),
         "evidence_original_name": shift.evidence_original_name,
         "evidence_uploaded_at": shift.evidence_uploaded_at,
         "evidence_uploaded_by_name": shift.evidence_uploaded_by.full_name if shift.evidence_uploaded_by else None,
@@ -320,10 +346,23 @@ def close_shift(shift_id: int, payload: CashShiftClose, request: Request, db: Da
             status_code=409,
             detail="Completa entrada y salida o registra una incidencia para: " + ", ".join(incomplete),
         )
+    missing_receipts = missing_receipt_numbers(db, shift)
+    gap_reason = " ".join(payload.receipt_gap_reason.split()) if payload.receipt_gap_reason else None
+    if missing_receipts and (gap_reason is None or len(gap_reason) < 3):
+        formatted = ", ".join(f"{number:04d}" for number in missing_receipts[:20])
+        suffix = "…" if len(missing_receipts) > 20 else ""
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Faltan los folios {formatted}{suffix}. Corrígelos desde Ventas "
+                "o escribe el motivo del salto antes de cerrar el turno"
+            ),
+        )
     shift.cash_counted = payload.cash_counted
     shift.card_reported = payload.card_reported
     shift.transfer_reported = payload.transfer_reported
     shift.closing_notes = " ".join(payload.closing_notes.split()) if payload.closing_notes else None
+    shift.receipt_gap_reason = gap_reason if missing_receipts else None
     shift.closed_by_user_id = request.state.user.id
     shift.status = "CLOSED"
     shift.closed_at = datetime.now(LOCAL_ZONE)

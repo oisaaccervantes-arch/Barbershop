@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,14 @@ from app.schemas.service import (
 
 router = APIRouter(prefix="/api/services", tags=["services"])
 DatabaseSession = Annotated[Session, Depends(get_db)]
+
+
+def require_admin(request: Request) -> None:
+    if request.state.user.role != "ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo administración puede modificar el catálogo",
+        )
 
 
 def get_service_or_404(service_id: int, db: Session) -> Service:
@@ -41,7 +49,8 @@ def list_services(
 
 
 @router.post("", response_model=ServiceRead, status_code=status.HTTP_201_CREATED)
-def create_service(payload: ServiceCreate, db: DatabaseSession):
+def create_service(payload: ServiceCreate, request: Request, db: DatabaseSession):
+    require_admin(request)
     service = Service(**payload.model_dump())
     db.add(service)
     db.commit()
@@ -50,7 +59,8 @@ def create_service(payload: ServiceCreate, db: DatabaseSession):
 
 
 @router.put("/{service_id}", response_model=ServiceRead)
-def update_service(service_id: int, payload: ServiceUpdate, db: DatabaseSession):
+def update_service(service_id: int, payload: ServiceUpdate, request: Request, db: DatabaseSession):
+    require_admin(request)
     service = get_service_or_404(service_id, db)
     for field, value in payload.model_dump().items():
         setattr(service, field, value)
@@ -63,8 +73,10 @@ def update_service(service_id: int, payload: ServiceUpdate, db: DatabaseSession)
 def update_service_status(
     service_id: int,
     payload: ServiceStatusUpdate,
+    request: Request,
     db: DatabaseSession,
 ):
+    require_admin(request)
     service = get_service_or_404(service_id, db)
     service.active = payload.active
     db.commit()
