@@ -159,6 +159,8 @@ def attendance_record(db: Session, shift: CashShift, person_type: str, employee)
         person_name=employee.name,
         scheduled_start=schedule.start_time if schedule and schedule.status == "WORK" else None,
         scheduled_end=schedule.end_time if schedule and schedule.status == "WORK" else None,
+        scheduled_meal_start=schedule.meal_start if schedule and schedule.status == "WORK" else None,
+        scheduled_meal_end=schedule.meal_end if schedule and schedule.status == "WORK" else None,
         status="REST" if schedule and schedule.status == "REST" else "PENDING",
     )
     if shift.shift_type == "EVENING":
@@ -319,7 +321,10 @@ def get_shift_evidence(shift_id: int, db: DatabaseSession):
 def close_shift(shift_id: int, payload: CashShiftClose, request: Request, db: DatabaseSession):
     shift = db.scalar(
         select(CashShift)
-        .options(selectinload(CashShift.attendance_records))
+        .options(
+            selectinload(CashShift.attendance_records)
+            .selectinload(AttendanceRecord.evidences)
+        )
         .where(CashShift.id == shift_id)
     )
     if shift is None or shift.status != "OPEN":
@@ -335,6 +340,13 @@ def close_shift(shift_id: int, payload: CashShiftClose, request: Request, db: Da
             continue
         if row.clock_in is None:
             incomplete.append(row.person_name)
+            continue
+        has_scheduled_meal = bool(row.scheduled_meal_start and row.scheduled_meal_end)
+        if row.meal_out is not None and row.meal_in is None:
+            incomplete.append(f"{row.person_name} (regreso de comida)")
+            continue
+        if has_scheduled_meal and (row.meal_out is None or row.meal_in is None):
+            incomplete.append(f"{row.person_name} (comida)")
             continue
         if row.clock_out is None:
             if shift.shift_type == "MORNING" and works_evening(db, row, shift):

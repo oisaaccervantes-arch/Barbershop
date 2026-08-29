@@ -17,6 +17,7 @@ from app.routers.services import router as services_router
 from app.routers.receptionists import router as receptionists_router
 from app.routers.attendance import router as attendance_router
 from app.routers.users import router as users_router
+from app.routers.timeclock import router as timeclock_router
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -46,9 +47,16 @@ app.include_router(receptionists_router)
 app.include_router(auth_router)
 app.include_router(attendance_router)
 app.include_router(users_router)
+app.include_router(timeclock_router)
 
 
-PUBLIC_API_PATHS = {"/api/auth/login", "/api/health", "/api/health/database"}
+PUBLIC_API_PATHS = {
+    "/api/auth/login",
+    "/api/health",
+    "/api/health/database",
+    "/api/timeclock/status",
+    "/api/timeclock/punch",
+}
 
 
 @app.middleware("http")
@@ -98,6 +106,22 @@ def frontend_javascript():
 @app.get("/styles.css", include_in_schema=False)
 def frontend_styles():
     return FileResponse(FRONTEND_DIR / "styles.css", media_type="text/css")
+
+
+@app.get("/checador", include_in_schema=False)
+@app.get("/checador/", include_in_schema=False)
+def timeclock_frontend():
+    return FileResponse(FRONTEND_DIR / "timeclock.html")
+
+
+@app.get("/timeclock.js", include_in_schema=False)
+def timeclock_javascript():
+    return FileResponse(FRONTEND_DIR / "timeclock.js", media_type="application/javascript")
+
+
+@app.get("/timeclock.css", include_in_schema=False)
+def timeclock_styles():
+    return FileResponse(FRONTEND_DIR / "timeclock.css", media_type="text/css")
 
 
 @app.get("/api/health")

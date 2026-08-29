@@ -40,6 +40,10 @@
           <span class="material-symbols-outlined">login</span>
           Entrar
         </button>
+        <button class="secondary-button" id="openTimeclockFromLogin" type="button">
+          <span class="material-symbols-outlined">photo_camera</span>
+          Abrir checador
+        </button>
       </form>
     </div>
   </div>
@@ -83,6 +87,10 @@
         <span class="material-symbols-outlined">schedule</span>
         Checador
       </button>
+      <button class="nav-item" data-view="timeclockAudit" data-admin-only>
+        <span class="material-symbols-outlined">fact_check</span>
+        Auditoría checador
+      </button>
       <button class="nav-item" data-view="shift">
         <span class="material-symbols-outlined"></span>
         Corte de turno
@@ -108,6 +116,7 @@
       <div class="topbar-actions">
         <div class="session-user">
           <span id="sessionUserName"></span>
+          <button class="chip-button" id="openTimeclockFromApp" type="button">Modo checador</button>
           <button class="chip-button" id="logoutButton" type="button">Salir</button>
         </div>
         <div class="metric">
@@ -642,17 +651,18 @@
             <button class="secondary-button" type="button" id="copyPreviousWeek">Copiar semana anterior</button>
             <button class="secondary-button" type="button" id="exportScheduleExcel"><span class="material-symbols-outlined">download</span> Exportar Excel</button>
           </div>
-          <fieldset class="schedule-people-picker">
+          <div class="schedule-readonly hidden" id="scheduleReadOnly"></div>
+          <fieldset class="schedule-people-picker" id="schedulePeoplePicker">
             <legend>Personal de este turno</legend>
             <p class="muted">Selecciona únicamente quienes estarán en el turno elegido.</p>
             <div class="schedule-people-options" id="schedulePeopleOptions"></div>
           </fieldset>
-          <div class="schedule-help">En cada día captura entrada y salida. Activa <strong>Descanso</strong> cuando no trabaje. La comida es opcional.</div>
-          <div class="table-wrap weekly-schedule-wrap"><table class="weekly-schedule-table">
+          <div class="schedule-help" id="scheduleEditorHelp">En cada día captura entrada y salida. Activa <strong>Descanso</strong> cuando no trabaje. La comida es opcional.</div>
+          <div class="table-wrap weekly-schedule-wrap" id="scheduleEditorTable"><table class="weekly-schedule-table">
             <thead><tr id="scheduleWeekHeader"></tr></thead>
             <tbody id="scheduleRows"></tbody>
           </table></div>
-          <button class="submit-button" type="submit">Guardar semana completa</button>
+          <button class="submit-button" id="saveWeeklySchedule" type="submit">Guardar semana completa</button>
         </form>
 
         <div class="panel full-panel hidden" id="savedSchedulesPanel" data-admin-only>
@@ -672,6 +682,35 @@
         <div class="panel full-panel">
           <div class="panel-header"><div><p class="eyebrow">Historial</p><h3>Asistencias por semana</h3><p class="muted">Despliega una semana para comparar el horario programado con las horas registradas.</p></div></div>
           <div class="attendance-history-groups" id="attendanceHistoryGroups"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="timeclockAudit" data-admin-only>
+      <div class="workspace">
+        <div class="panel full-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Solo administración</p>
+              <h3>Auditoría del checador</h3>
+              <p class="muted">Consulta movimientos, incidencias y fotografías. Las imágenes se eliminan automáticamente después de 90 días.</p>
+            </div>
+            <div class="catalog-actions">
+              <button class="secondary-button" id="exportTimeclockAudit" type="button"><span class="material-symbols-outlined">download</span>Exportar Excel</button>
+              <button class="secondary-button" id="refreshTimeclockAudit" type="button"><span class="material-symbols-outlined">refresh</span>Actualizar</button>
+            </div>
+          </div>
+          <form class="audit-filters" id="timeclockAuditFilters">
+            <label>Desde<input name="dateFrom" type="date"></label>
+            <label>Hasta<input name="dateTo" type="date"></label>
+            <label>Tipo<select name="personType"><option value="">Todo el personal</option><option value="BARBER">Barberos</option><option value="RECEPTIONIST">Recepción</option></select></label>
+            <label>Persona<select name="personId"><option value="">Todas</option></select></label>
+            <label>Asistencia<select name="punctuality"><option value="">Todos los movimientos</option><option value="LATE_ARRIVAL">Retardos</option><option value="EARLY_DEPARTURE">Salidas anticipadas</option><option value="EARLY_ARRIVAL">Entradas anticipadas</option><option value="LATE_DEPARTURE">Salidas posteriores</option><option value="ON_TIME">A la hora</option></select></label>
+            <label class="audit-check"><input name="incidentOnly" type="checkbox"> Solo incidencias</label>
+            <button class="secondary-button" type="submit">Aplicar filtros</button>
+          </form>
+          <div class="timeclock-audit-summary" id="timeclockAuditSummary"></div>
+          <div class="timeclock-audit-grid" id="timeclockAuditGrid"></div>
         </div>
       </div>
     </section>
@@ -778,9 +817,9 @@
               </label>
               <div class="schedule-help hidden" id="receiptGapNotice"></div>
               <label class="hidden" id="receiptGapReasonField">Motivo de los folios faltantes
-                <textarea name="receiptGapReason" maxlength="500" rows="3"
+                <textarea name="receiptGapReason" minlength="3" maxlength="500" rows="3"
                   placeholder="Ej. La nota física se canceló y no fue utilizada"></textarea>
-                <small>También puedes corregir los folios desde Ventas; si la secuencia queda completa ya no será necesario justificar.</small>
+                <small>Escribe al menos 3 caracteres. También puedes corregir los folios desde Ventas; si la secuencia queda completa ya no será necesario justificar.</small>
               </label>
             </form>
           </div>
@@ -891,7 +930,7 @@
           <label>Regreso de comida<input name="mealIn" type="datetime-local"></label>
           <label>Salida final<input name="clockOut" type="datetime-local"></label>
           <label>Estado<select name="status"><option value="PENDING">Pendiente</option><option value="PRESENT">Asistió</option><option value="ABSENT">Falta</option><option value="REST">Descanso</option><option value="PERMISSION">Permiso</option></select></label>
-          <label>Notas<input name="notes" maxlength="500"></label>
+          <label>Motivo de la corrección<input name="notes" minlength="3" maxlength="500" required></label>
         </div>
         <div class="modal-actions"><button class="secondary-button" id="cancelAttendanceCorrection" type="button">Cancelar</button><button class="submit-button" type="submit">Guardar corrección</button></div>
       </form>
@@ -1056,6 +1095,30 @@
     </form>
   </div>
 
+  <div class="modal-backdrop hidden" id="timeclockPinModal">
+    <form class="modal-card" id="timeclockPinForm">
+      <div class="panel-header">
+        <div><p class="eyebrow">Solo administración</p><h3>Configurar PIN del checador</h3></div>
+        <button class="icon-button" id="closeTimeclockPinModal" type="button" title="Cerrar"><span class="material-symbols-outlined">close</span></button>
+      </div>
+      <p id="timeclockPinPerson"></p>
+      <input name="personType" type="hidden">
+      <input name="personId" type="hidden">
+      <label>Nuevo PIN
+        <input name="pin" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="8" autocomplete="new-password" required>
+        <small>Utiliza entre 4 y 8 números. No reutilices el PIN de otra persona.</small>
+      </label>
+      <label>Repetir PIN
+        <input name="confirmPin" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="8" autocomplete="new-password" required>
+      </label>
+      <div class="modal-actions">
+        <button class="secondary-button hidden" id="removeTimeclockPin" type="button">Quitar PIN</button>
+        <button class="secondary-button" id="cancelTimeclockPinModal" type="button">Cancelar</button>
+        <button class="submit-button" type="submit">Guardar PIN</button>
+      </div>
+    </form>
+  </div>
+
   <div class="modal-backdrop hidden" id="helpModal">
     <div class="modal-card help-modal-card">
       <div class="panel-header">
@@ -1071,21 +1134,21 @@
       <section class="help-role-section" data-admin-only>
         <p class="eyebrow">Funciones de administradora</p>
         <div class="help-admin-grid">
-          <div><strong>Personal y cuentas</strong><span>En <b>Personal</b> administra barberos, recepcionistas y cuentas de acceso. El rol <b>Soporte</b> es visible y permite consultar sin modificar operaciones. Al editar una cuenta, deja la contraseña vacía para conservarla o escribe una nueva para restablecerla.</span></div>
-          <div><strong>Horarios semanales</strong><span>En <b>Checador</b> selecciona semana y turno, elige el personal, captura horarios o descansos y guarda la semana completa. Una misma persona puede estar programada en Matutino y Vespertino; también puedes copiar horarios y exportarlos a Excel.</span></div>
-          <div><strong>Correcciones</strong><span>La administradora puede corregir asistencias y consultar quién realizó el último registro. Las recepcionistas no pueden modificar horarios ni corregir registros anteriores.</span></div>
+          <div><strong>Personal, cuentas y PIN</strong><span>En <b>Personal</b> administra barberos, recepcionistas, cuentas y el PIN individual del checador. El PIN no puede consultarse después de guardarlo; únicamente puede reemplazarse.</span></div>
+          <div><strong>Horarios semanales</strong><span>En <b>Checador</b> selecciona semana y turno, elige el personal, captura horarios o descansos y guarda la semana completa. El horario guardado aparece en modo consulta; usa <b>Editar horario</b> únicamente cuando necesites cambiarlo. También puedes copiar la semana anterior y exportarla a Excel.</span></div>
+          <div><strong>Correcciones y evidencias</strong><span>La administradora puede corregir asistencias dejando un motivo y consultar las fotografías en <b>Auditoría checador</b>. Ahí puede filtrar retardos, salidas anticipadas, entradas anticipadas, salidas posteriores e incidencias, además de exportar el resultado. Las fotografías se conservan 90 días. Recepción no puede corregir movimientos, asignar PIN ni ver las imágenes.</span></div>
         </div>
       </section>
       <p class="eyebrow help-flow-title">Operación diaria de recepción</p>
       <div class="help-steps">
         <details open><summary><span>1</span> Abrir el turno</summary><p>En <strong>Corte de turno</strong>, verifica si abrirás Matutino o Vespertino. El sistema selecciona automáticamente la recepcionista y los barberos programados para ese día, pero puedes modificarlos antes de abrir. Captura también el fondo inicial y revisa el folio sugerido.</p></details>
-        <details><summary><span>2</span> Registrar asistencias</summary><p>En <strong>Checador</strong>, registra entrada, salida y comida del personal. Para marcar falta o permiso deberás confirmarlo. Si una persona está programada en ambos turnos, el matutino conservará su entrada y la jornada continuará automáticamente en el vespertino; registra su salida final hasta que termine de trabajar.</p></details>
+        <details><summary><span>2</span> Registrar asistencias</summary><p>Abre el <strong>Modo checador</strong>. Cada persona ingresa su PIN y toma una fotografía con la cámara de esta computadora para entrada, salida a comida, regreso y salida. El checador rechaza cámaras sincronizadas de celular. Recepción solamente puede agregar personal de último momento al turno; no puede marcar movimientos por otras personas.</p></details>
         <details><summary><span>3</span> Agendar y confirmar citas</summary><p>Captura teléfono, nombre, fecha y hora. El barbero y los servicios pueden quedar pendientes. Al confirmar, completa esos datos; se permiten varios servicios y se evitan citas simultáneas para el mismo barbero.</p></details>
         <details><summary><span>4</span> Cobrar servicios</summary><p>Desde una cita usa <strong>Cobrar</strong>, o entra directamente a <strong>Caja</strong> para una venta sin cita. Selecciona cliente opcional, barbero, servicios y método de pago. Si hoy es el cumpleaños registrado del cliente, puedes activar 50 % de descuento sobre todos los servicios de la venta. Verifica el folio antes de confirmar. Si la nota quedó con un folio incorrecto, administración o recepción puede corregirlo desde <strong>Ventas</strong>; el motivo y el usuario quedan registrados.</p></details>
         <details><summary><span>5</span> Registrar gastos y revisar ventas</summary><p>Los gastos del turno se capturan en <strong>Corte de turno</strong>. En <strong>Ventas</strong> puedes filtrar por fechas o barbero, consultar gráficas, movimientos, neto después de gastos y motivos de cancelación.</p></details>
         <details><summary><span>6</span> Adjuntar evidencia del checador</summary><p>Antes de capturar el conteo real, descarga desde WhatsApp Web la fotografía del checador. En <strong>Corte de turno</strong>, elige la imagen y presiona <strong>Subir evidencia</strong>. Al guardarse se habilitarán los campos del corte. Comprueba la miniatura; puedes reemplazarla mientras el turno esté abierto.</p></details>
         <details><summary><span>7</span> Cerrar el turno</summary><p>Después de adjuntar la evidencia, registra efectivo entregado, corte de terminal, transferencias verificadas y notas opcionales. Revisa las diferencias. Para cerrar deben estar completas las asistencias y la secuencia de folios; si falta una nota, corrige el folio desde Ventas o registra el motivo del salto. En el matutino no se exige salida a quien tenga horario vespertino porque su jornada continúa. El sistema guarda quién subió la foto y quién cerró.</p></details>
-        <details><summary><span>8</span> Consultar y exportar historial</summary><p>En turnos anteriores abre <strong>Ver desglose</strong> para consultar conciliación, gastos, producción, evidencia y responsables. En <strong>Checador</strong> las asistencias semanales aparecen separadas en Matutino y Vespertino, con entrada y salida reales; también pueden exportarse a Excel.</p></details>
+        <details><summary><span>8</span> Consultar y exportar historial</summary><p>En turnos anteriores abre <strong>Ver desglose</strong> para consultar conciliación, gastos, producción, evidencia y responsables. En <strong>Checador</strong> las asistencias semanales comparan el horario programado con la entrada y salida reales, mostrando minutos tarde, antes o después. El historial puede exportarse a Excel. Las fotografías y filtros detallados de <strong>Auditoría checador</strong> son exclusivos de administración.</p></details>
       </div>
       <div class="modal-actions">
         <button class="submit-button" id="finishHelp" type="button">Entendido</button>

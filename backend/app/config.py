@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     auth_session_hours: int = 12
     auth_cookie_path: str = "/"
     evidence_dir: str = "uploads/shift_evidence"
+    timeclock_evidence_retention_days: int = 90
 
     model_config = SettingsConfigDict(
         env_file=".env",

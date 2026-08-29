@@ -4,7 +4,7 @@ from app.models.customer import Customer
 from app.models.cash_shift import CashShift, ShiftBarber, ShiftExpense
 from app.models.sale import Payment, Sale, SaleItem, SaleReceiptCorrection
 from app.models.receptionist import Receptionist
-from app.models.attendance import AttendanceRecord, WorkSchedule
+from app.models.attendance import AttendanceEvidence, AttendanceRecord, WorkSchedule
 from app.models.user import User
 from app.models.service import Service
 
@@ -22,4 +22,7 @@ __all__ = [
     "Service",
     "ShiftBarber",
     "ShiftExpense",
+    "AttendanceEvidence",
+    "AttendanceRecord",
+    "WorkSchedule",
 ]

@@ -15,6 +15,7 @@ services:
       AUTH_COOKIE_PATH: /bizantino
       AUTH_SESSION_HOURS: ${AUTH_SESSION_HOURS:-12}
       EVIDENCE_DIR: /data/shift_evidence
+      TIMECLOCK_EVIDENCE_RETENTION_DAYS: ${TIMECLOCK_EVIDENCE_RETENTION_DAYS:-90}
     depends_on:
       db:
         condition: service_healthy

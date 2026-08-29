@@ -12,6 +12,11 @@ class Receptionist(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    timeclock_pin_hash: Mapped[str | None] = mapped_column(String(255))
+
+    @property
+    def has_timeclock_pin(self) -> bool:
+        return bool(self.timeclock_pin_hash)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()

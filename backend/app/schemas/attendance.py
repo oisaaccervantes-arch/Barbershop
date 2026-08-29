@@ -57,7 +57,7 @@ class AttendanceCorrection(BaseModel):
     meal_in: datetime | None = None
     clock_out: datetime | None = None
     status: AttendanceStatus
-    notes: str | None = Field(default=None, max_length=500)
+    notes: str = Field(min_length=3, max_length=500)
 
 
 class CurrentShiftPersonAdd(BaseModel):
@@ -75,6 +75,8 @@ class AttendanceRead(BaseModel):
     person_name: str
     scheduled_start: time | None
     scheduled_end: time | None
+    scheduled_meal_start: time | None
+    scheduled_meal_end: time | None
     clock_in: datetime | None
     meal_out: datetime | None
     meal_in: datetime | None

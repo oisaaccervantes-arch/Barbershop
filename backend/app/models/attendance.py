@@ -45,6 +45,8 @@ class AttendanceRecord(Base):
     person_name: Mapped[str] = mapped_column(String(120), nullable=False)
     scheduled_start: Mapped[time | None] = mapped_column(Time)
     scheduled_end: Mapped[time | None] = mapped_column(Time)
+    scheduled_meal_start: Mapped[time | None] = mapped_column(Time)
+    scheduled_meal_end: Mapped[time | None] = mapped_column(Time)
     clock_in: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     meal_out: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     meal_in: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -68,3 +70,35 @@ class AttendanceRecord(Base):
     recorded_by = relationship("User", foreign_keys=[recorded_by_user_id])
     corrected_by = relationship("User", foreign_keys=[corrected_by_user_id])
     added_by = relationship("User", foreign_keys=[added_by_user_id])
+    evidences = relationship("AttendanceEvidence", back_populates="attendance_record", cascade="all, delete-orphan")
+
+
+class AttendanceEvidence(Base):
+    __tablename__ = "attendance_evidences"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('CLOCK_IN', 'MEAL_OUT', 'MEAL_IN', 'CLOCK_OUT')",
+            name="ck_attendance_evidence_event_type",
+        ),
+        UniqueConstraint(
+            "attendance_record_id", "event_type",
+            name="uq_attendance_evidence_record_event",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    attendance_record_id: Mapped[int] = mapped_column(
+        ForeignKey("attendance_records.id", ondelete="CASCADE"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    photo_file_name: Mapped[str | None] = mapped_column(String(255))
+    photo_content_type: Mapped[str] = mapped_column(String(100), nullable=False, default="image/webp")
+    photo_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    incident_type: Mapped[str | None] = mapped_column(String(50))
+    photo_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    attendance_record = relationship("AttendanceRecord", back_populates="evidences")

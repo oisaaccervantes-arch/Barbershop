@@ -59,6 +59,8 @@ def serialize_attendance(row: AttendanceRecord) -> dict:
         "person_name": row.person_name,
         "scheduled_start": row.scheduled_start,
         "scheduled_end": row.scheduled_end,
+        "scheduled_meal_start": row.scheduled_meal_start,
+        "scheduled_meal_end": row.scheduled_meal_end,
         "clock_in": row.clock_in,
         "meal_out": row.meal_out,
         "meal_in": row.meal_in,
@@ -171,6 +173,7 @@ def export_attendance_excel(week_start: date, db: DatabaseSession):
 
 @router.post("/{record_id}/event", response_model=AttendanceRead)
 def register_event(record_id: int, payload: AttendanceEvent, request: Request, db: DatabaseSession):
+    require_admin(request)
     row = db.scalar(attendance_query().where(AttendanceRecord.id == record_id))
     if row is None or row.shift.status != "OPEN":
         raise HTTPException(status_code=400, detail="El registro no pertenece a un turno abierto")

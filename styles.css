@@ -616,6 +616,17 @@ td small { color: var(--muted); }
   box-shadow: 0 24px 70px rgba(0, 0, 0, .28);
 }
 
+#closeShiftModal {
+  overflow-y: auto;
+}
+
+#closeShiftModal .modal-card {
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .modal-actions {
   display: grid;
   grid-template-columns: 1fr 1.4fr;
@@ -1090,7 +1101,18 @@ td small { color: var(--muted); }
 .saved-schedule-card h4 { font-size: 1.35rem; margin: 3px 0 9px; }
 .saved-schedule-card p { margin: 0 0 5px; }
 .saved-schedule-card small { color: var(--muted); }
+.schedule-readonly { display: grid; gap: 14px; }
+.schedule-readonly.hidden { display: none; }
+.schedule-saved-heading { align-items: center; display: flex; gap: 18px; justify-content: space-between; }
+.schedule-saved-heading p { color: var(--muted); margin: 8px 0 0; }
+.schedule-readonly-table { border-collapse: collapse; min-width: 1120px; width: 100%; }
+.schedule-readonly-table th, .schedule-readonly-table td { border-bottom: 1px solid var(--line); padding: 14px; text-align: left; vertical-align: top; }
+.schedule-readonly-table th { background: var(--soft); min-width: 150px; }
+.schedule-readonly-table th small, .schedule-readonly-table td small, .schedule-readonly-table td span { color: var(--muted); display: block; font-size: .75rem; margin-top: 4px; }
+.schedule-readonly-table td { min-width: 130px; }
+.schedule-readonly-table td strong { display: block; margin-top: 5px; }
 @media (max-width: 760px) { .saved-schedule-sections { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .schedule-saved-heading { align-items: stretch; flex-direction: column; } }
 .schedule-person-option { align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; display: flex; gap: 8px; padding: 9px 12px; }
 .schedule-person-option:has(input:checked) { background: var(--gold-soft); border-color: #c79217; }
 .schedule-person-option input { height: 18px; margin: 0; width: 18px; }
@@ -1166,6 +1188,7 @@ td small { color: var(--muted); }
 .attendance-matrix-cell strong { display: block; font-size: .87rem; margin-top: 2px; }
 .attendance-matrix-empty { color: var(--muted); text-align: center; }
 .attendance-on-time, .attendance-early, .attendance-late, .attendance-incidence, .attendance-no-schedule { border-radius: 999px; display: inline-block; font-size: .72rem; font-weight: 800; margin-top: 9px; padding: 4px 8px; }
+.attendance-differences { align-items: flex-start; display: flex; flex-direction: column; }
 .attendance-on-time, .attendance-early { background: #d9f4e4; color: #176b3b; }
 .attendance-late { background: #ffe1dc; color: #a52b1b; }
 .attendance-incidence { background: var(--gold-soft); color: #735500; }
@@ -1206,3 +1229,25 @@ td small { color: var(--muted); }
 .receipt-correction-history p {
   margin: 0.55rem 0 0;
 }
+
+.audit-filters { align-items:end; display:grid; gap:12px; grid-template-columns:repeat(4,minmax(140px,1fr)) auto auto; margin:20px 0; }
+.audit-check { align-items:center; display:flex; gap:8px; min-height:48px; }
+.audit-check input { height:18px; margin:0; width:18px; }
+.timeclock-audit-summary { background:var(--gold-soft); border-radius:10px; display:flex; flex-wrap:wrap; gap:18px; margin-bottom:18px; padding:13px 16px; }
+.timeclock-audit-summary span { color:var(--muted); }
+.timeclock-audit-grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); }
+.timeclock-audit-card { background:var(--surface); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+.timeclock-audit-card.incident { border-color:#d2a51d; box-shadow:0 0 0 2px var(--gold-soft); }
+.timeclock-photo { aspect-ratio:4/3; background:#26201b; overflow:hidden; }
+.timeclock-photo img { height:100%; object-fit:cover; width:100%; }
+.expired-photo { align-items:center; color:#d4ccc4; display:flex; flex-direction:column; gap:7px; height:100%; justify-content:center; }
+.expired-photo span { font-size:42px; }
+.timeclock-audit-body { padding:15px; }
+.timeclock-audit-body > div { align-items:center; display:flex; flex-wrap:wrap; gap:7px; }
+.timeclock-audit-body h4 { font-size:1.15rem; margin:12px 0 3px; }
+.timeclock-audit-body p { color:var(--muted); margin:0 0 10px; }
+.timeclock-audit-body strong,.timeclock-audit-body small { display:block; }
+.timeclock-audit-body small { color:var(--muted); margin-top:7px; }
+
+@media (max-width:1000px) { .audit-filters { grid-template-columns:1fr 1fr; } }
+@media (max-width:560px) { .audit-filters { grid-template-columns:1fr; } }

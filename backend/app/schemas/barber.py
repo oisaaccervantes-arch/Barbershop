@@ -34,4 +34,4 @@ class BarberRead(BarberBase):
     id: int
     created_at: datetime
     updated_at: datetime
-
+    has_timeclock_pin: bool = False
