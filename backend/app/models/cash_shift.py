@@ -45,6 +45,7 @@ class CashShift(Base):
     expenses = relationship("ShiftExpense", back_populates="shift", cascade="all, delete-orphan")
     receptionist = relationship("Receptionist")
     attendance_records = relationship("AttendanceRecord", back_populates="shift", cascade="all, delete-orphan")
+    cleaning_evidences = relationship("ShiftCleaningEvidence", back_populates="shift", cascade="all, delete-orphan")
     evidence_uploaded_by = relationship("User", foreign_keys=[evidence_uploaded_by_user_id])
     closed_by = relationship("User", foreign_keys=[closed_by_user_id])
 
@@ -72,3 +73,18 @@ class ShiftExpense(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     shift = relationship("CashShift", back_populates="expenses")
+
+
+class ShiftCleaningEvidence(Base):
+    __tablename__ = "shift_cleaning_evidences"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    shift_id: Mapped[int] = mapped_column(ForeignKey("cash_shifts.id", ondelete="CASCADE"), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    uploaded_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+    shift = relationship("CashShift", back_populates="cleaning_evidences")
+    uploaded_by = relationship("User")

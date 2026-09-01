@@ -1154,7 +1154,8 @@ function renderShift() {
   const evidenceStatus = $("#shiftEvidenceStatus");
   const evidencePreview = $("#shiftEvidencePreview");
   const closeShiftButton = $("#closeShiftButton");
-  const hasEvidence = Boolean(currentShift.evidence_url);
+  const cleaningEvidences = currentShift.cleaning_evidences || [];
+  const hasEvidence = cleaningEvidences.length > 0;
   const missingReceipts = currentShift.missing_receipt_numbers || [];
   const receiptGapNotice = $("#receiptGapNotice");
   const receiptGapReasonField = $("#receiptGapReasonField");
@@ -1165,21 +1166,25 @@ function renderShift() {
     : "";
   const formReceiptGapReason = $("#closeShiftForm").receiptGapReason;
   formReceiptGapReason.required = missingReceipts.length > 0;
-  evidenceStatus.textContent = currentShift.evidence_url ? "Adjuntada" : "Pendiente";
+  evidenceStatus.textContent = hasEvidence ? `${cleaningEvidences.length} de 5` : "Pendiente";
   evidenceStatus.classList.toggle("complete", hasEvidence);
   ["cashSalesCounted", "cardReported", "transferReported", "closingNotes", "receiptGapReason"].forEach(field => {
     $("#closeShiftForm")[field].disabled = !hasEvidence;
   });
   $("#closeShiftForm").classList.toggle("evidence-locked", !hasEvidence);
   $("#closeShiftEvidenceNotice").classList.toggle("hidden", hasEvidence);
-  closeShiftButton.classList.toggle("requires-evidence", !currentShift.evidence_url);
+  closeShiftButton.classList.toggle("requires-evidence", !hasEvidence);
   closeShiftButton.disabled = !hasEvidence;
-  if (currentShift.evidence_url) closeShiftButton.removeAttribute("aria-describedby");
+  if (hasEvidence) closeShiftButton.removeAttribute("aria-describedby");
   else closeShiftButton.setAttribute("aria-describedby", "shiftEvidenceStatus");
-  closeShiftButton.title = currentShift.evidence_url ? "" : "Adjunta la evidencia del checador para cerrar";
-  evidencePreview.innerHTML = currentShift.evidence_url
-    ? `<a href="${apiFileUrl(currentShift.evidence_url)}" target="_blank" rel="noopener"><img src="${apiFileUrl(currentShift.evidence_url)}?v=${encodeURIComponent(currentShift.evidence_uploaded_at || "")}" alt="Evidencia del checador"><span><strong>${escapeHtml(currentShift.evidence_original_name || "Evidencia del checador")}</strong><small>Adjuntada ${new Date(currentShift.evidence_uploaded_at).toLocaleString("es-MX")}${currentShift.evidence_uploaded_by_name ? ` por ${escapeHtml(currentShift.evidence_uploaded_by_name)}` : ""}. Puedes reemplazarla seleccionando otra imagen.</small></span></a>`
-    : `<p class="muted">Todavía no se ha adjuntado la foto de este corte.</p>`;
+  closeShiftButton.title = hasEvidence ? "" : "Adjunta al menos una fotografía de limpieza para cerrar";
+  evidencePreview.innerHTML = cleaningEvidences.length
+    ? cleaningEvidences.map((photo, index) => `<article class="cleaning-evidence-card">
+        <a href="${apiFileUrl(photo.url)}" target="_blank" rel="noopener"><img src="${apiFileUrl(photo.url)}?v=${encodeURIComponent(photo.uploaded_at || "")}" alt="Evidencia de limpieza ${index + 1}"></a>
+        <span><strong>${escapeHtml(photo.original_name || `Foto de limpieza ${index + 1}`)}</strong><small>Adjuntada ${photo.uploaded_at ? new Date(photo.uploaded_at).toLocaleString("es-MX") : "anteriormente"}${photo.uploaded_by_name ? ` por ${escapeHtml(photo.uploaded_by_name)}` : ""}</small></span>
+        ${photo.id ? `<button class="icon-button" type="button" data-delete-cleaning-evidence="${photo.id}" title="Quitar fotografía"><span class="material-symbols-outlined">delete</span></button>` : ""}
+      </article>`).join("")
+    : `<p class="muted">Todavía no se han adjuntado fotografías de limpieza.</p>`;
 
   $("#shiftSystemTotals").innerHTML = `
     <div class="cut-line"><span>Fondo inicial</span><strong>${money(currentShift.opening_cash)}</strong></div>
@@ -1337,12 +1342,12 @@ function historicalShiftDetail(shift, summary) {
         <div class="cut-line total"><span>Total de gastos</span><strong>${money(summary.expenses)}</strong></div>
         <div class="closing-notes"><strong>Notas del cierre</strong><p>${escapeHtml(shift.closing_notes || "Sin notas registradas.")}</p></div>
         ${shift.receipt_gap_reason ? `<div class="closing-notes"><strong>Motivo de folios faltantes</strong><p>${escapeHtml(shift.receipt_gap_reason)}</p></div>` : ""}
-        <div class="closing-notes"><strong>Evidencia del checador</strong>${shift.evidence_url
-          ? `<a class="evidence-history-card" href="${apiFileUrl(shift.evidence_url)}" target="_blank" rel="noopener">
-              <img src="${apiFileUrl(shift.evidence_url)}" alt="Evidencia del checador del turno">
-              <span><strong>${escapeHtml(shift.evidence_original_name || "Foto del checador")}</strong><small>Adjuntada ${new Date(shift.evidence_uploaded_at).toLocaleString("es-MX")}${shift.evidence_uploaded_by_name ? ` por ${escapeHtml(shift.evidence_uploaded_by_name)}` : ""}</small><em><span class="material-symbols-outlined">open_in_new</span> Abrir imagen completa</em></span>
-            </a>`
-          : `<p>Este corte anterior no tiene evidencia registrada.</p>`}</div>
+        <div class="closing-notes"><strong>Fotos de limpieza</strong>${(shift.cleaning_evidences || []).length
+          ? `<div class="cleaning-history-grid">${shift.cleaning_evidences.map((photo, index) => `<a class="evidence-history-card" href="${apiFileUrl(photo.url)}" target="_blank" rel="noopener">
+              <img src="${apiFileUrl(photo.url)}" alt="Evidencia de limpieza ${index + 1}">
+              <span><strong>${escapeHtml(photo.original_name || `Foto ${index + 1}`)}</strong><small>Adjuntada ${photo.uploaded_at ? new Date(photo.uploaded_at).toLocaleString("es-MX") : "anteriormente"}${photo.uploaded_by_name ? ` por ${escapeHtml(photo.uploaded_by_name)}` : ""}</small><em><span class="material-symbols-outlined">open_in_new</span> Abrir imagen completa</em></span>
+            </a>`).join("")}</div>`
+          : `<p>Este corte anterior no tiene fotos de limpieza registradas.</p>`}</div>
       </section>
       <section class="history-detail-card">
         <h4>Producción por barbero</h4>
@@ -3149,16 +3154,41 @@ $("#expenseForm").addEventListener("submit", async event => {
 
 $("#closeShiftForm").addEventListener("input", renderShift);
 $("#shiftEvidenceInput").addEventListener("change", event => {
-  const file = event.currentTarget.files[0];
-  $("#shiftEvidenceFileName").textContent = file ? file.name : "Ninguna imagen seleccionada";
-  $("#removeSelectedEvidence").classList.toggle("hidden", !file);
+  const files = [...event.currentTarget.files];
+  const available = 5 - (currentShift?.cleaning_evidences?.length || 0);
+  if (files.length > available) {
+    event.currentTarget.value = "";
+    $("#shiftEvidenceFileName").textContent = "Ninguna fotografía seleccionada";
+    $("#removeSelectedEvidence").classList.add("hidden");
+    return showToast(`Puedes agregar ${available} fotografía${available === 1 ? "" : "s"} más a este turno`);
+  }
+  $("#shiftEvidenceFileName").textContent = files.length ? `${files.length} fotografía${files.length === 1 ? "" : "s"} seleccionada${files.length === 1 ? "" : "s"}` : "Ninguna fotografía seleccionada";
+  $("#removeSelectedEvidence").classList.toggle("hidden", !files.length);
 });
 
 $("#removeSelectedEvidence").addEventListener("click", () => {
   $("#shiftEvidenceInput").value = "";
-  $("#shiftEvidenceFileName").textContent = "Ninguna imagen seleccionada";
+  $("#shiftEvidenceFileName").textContent = "Ninguna fotografía seleccionada";
   $("#removeSelectedEvidence").classList.add("hidden");
-  showToast("Selección de imagen eliminada");
+  showToast("Selección de fotografías eliminada");
+});
+
+$("#shiftEvidencePreview").addEventListener("click", async event => {
+  const button = event.target.closest("[data-delete-cleaning-evidence]");
+  if (!button || !currentShift) return;
+  if (!window.confirm("¿Quitar esta fotografía de limpieza del turno?")) return;
+  button.disabled = true;
+  try {
+    const response = await fetch(`${API_BASE_URL}/shifts/${currentShift.id}/cleaning-evidence/${button.dataset.deleteCleaningEvidence}`, { method: "DELETE" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "No fue posible quitar la fotografía");
+    currentShift = result;
+    renderShift();
+    showToast("Fotografía de limpieza eliminada");
+  } catch (error) {
+    showToast(error.message);
+    button.disabled = false;
+  }
 });
 
 $("#shiftEvidenceForm").addEventListener("submit", async event => {
@@ -3173,13 +3203,13 @@ $("#shiftEvidenceForm").addEventListener("submit", async event => {
     closingNotes: closeForm.closingNotes.value
   };
   const previousScrollPosition = window.scrollY;
-  const file = form.evidence.files[0];
-  if (!file) return showToast("Selecciona una imagen del checador");
+  const files = [...form.evidence.files];
+  if (!files.length) return showToast("Selecciona al menos una fotografía de limpieza");
   const button = form.querySelector('button[type="submit"]');
   button.disabled = true;
   try {
     const body = new FormData();
-    body.append("evidence", file);
+    files.forEach(file => body.append("evidence", file));
     const response = await fetch(`${API_BASE_URL}/shifts/${currentShift.id}/evidence`, {
       method: "POST",
       body
@@ -3188,7 +3218,7 @@ $("#shiftEvidenceForm").addEventListener("submit", async event => {
     if (!response.ok) throw new Error(result.detail || "No fue posible subir la evidencia");
     currentShift = result;
     form.reset();
-    $("#shiftEvidenceFileName").textContent = "Ninguna imagen seleccionada";
+    $("#shiftEvidenceFileName").textContent = "Ninguna fotografía seleccionada";
     $("#removeSelectedEvidence").classList.add("hidden");
     renderShift();
     closeForm.cashSalesCounted.value = closeDraft.cashSalesCounted;
@@ -3198,7 +3228,7 @@ $("#shiftEvidenceForm").addEventListener("submit", async event => {
     renderShift();
     switchView("shift");
     window.scrollTo({ top: previousScrollPosition, behavior: "instant" });
-    showToast("Evidencia del checador guardada");
+    showToast(`${files.length} fotografía${files.length === 1 ? "" : "s"} de limpieza guardada${files.length === 1 ? "" : "s"}`);
   } catch (error) {
     console.error(error);
     showToast(error.message || "No fue posible subir la evidencia");
@@ -3210,8 +3240,8 @@ $("#shiftEvidenceForm").addEventListener("submit", async event => {
 $("#closeShiftForm").addEventListener("submit", async event => {
   event.preventDefault();
   if (!currentShift) return;
-  if (!currentShift.evidence_url) {
-    showToast("Adjunta la evidencia del checador antes de cerrar el turno");
+  if (!(currentShift.cleaning_evidences || []).length) {
+    showToast("Adjunta al menos una fotografía de limpieza antes de cerrar el turno");
     $("#shiftEvidenceForm").scrollIntoView({ behavior: "smooth", block: "center" });
     $("#shiftEvidenceInput").focus();
     return;

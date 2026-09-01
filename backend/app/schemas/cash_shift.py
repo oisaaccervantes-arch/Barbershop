@@ -42,6 +42,14 @@ class ShiftExpenseRead(BaseModel):
     created_at: datetime
 
 
+class ShiftCleaningEvidenceRead(BaseModel):
+    id: int | None
+    original_name: str
+    uploaded_at: datetime | None
+    uploaded_by_name: str | None
+    url: str
+
+
 class CashShiftClose(BaseModel):
     cash_counted: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
     card_reported: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
@@ -71,6 +79,7 @@ class CashShiftRead(BaseModel):
     evidence_uploaded_by_name: str | None
     closed_by_name: str | None
     evidence_url: str | None
+    cleaning_evidences: list[ShiftCleaningEvidenceRead]
     next_receipt_number: int
     barbers: list[ShiftBarberRead]
     expenses: list[ShiftExpenseRead]

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
@@ -6,13 +7,14 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
 from app.config import get_settings
 from app.models.barber import Barber
-from app.models.cash_shift import CashShift, ShiftBarber, ShiftExpense
+from app.models.cash_shift import CashShift, ShiftBarber, ShiftCleaningEvidence, ShiftExpense
 from app.models.sale import Sale
 from app.models.receptionist import Receptionist
 from app.models.attendance import AttendanceRecord, WorkSchedule
@@ -25,11 +27,36 @@ LOCAL_ZONE = ZoneInfo("America/Hermosillo")
 MAX_RECEIPT_NUMBER = 10_000
 EVIDENCE_DIR = get_settings().evidence_path
 MAX_EVIDENCE_BYTES = 8 * 1024 * 1024
+MAX_STORED_EVIDENCE_BYTES = 500 * 1024
+MAX_CLEANING_EVIDENCES = 5
 ALLOWED_EVIDENCE_TYPES = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
 }
+
+
+def compressed_cleaning_photo(upload: UploadFile) -> bytes:
+    if (upload.content_type or "") not in ALLOWED_EVIDENCE_TYPES:
+        raise HTTPException(status_code=400, detail="Selecciona únicamente imágenes JPG, PNG o WEBP")
+    source = upload.file.read(MAX_EVIDENCE_BYTES + 1)
+    if not source:
+        raise HTTPException(status_code=400, detail="Una de las fotografías está vacía")
+    if len(source) > MAX_EVIDENCE_BYTES:
+        raise HTTPException(status_code=413, detail="Cada fotografía original puede pesar como máximo 8 MB")
+    try:
+        with Image.open(BytesIO(source)) as opened:
+            image = ImageOps.exif_transpose(opened).convert("RGB")
+            image.thumbnail((1280, 960), Image.Resampling.LANCZOS)
+            for quality in (74, 66, 58, 50):
+                output = BytesIO()
+                image.save(output, format="WEBP", quality=quality, method=6)
+                content = output.getvalue()
+                if len(content) <= MAX_STORED_EVIDENCE_BYTES:
+                    return content
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="No se pudo procesar una de las fotografías") from exc
+    raise HTTPException(status_code=413, detail="No fue posible comprimir una fotografía a menos de 500 KB")
 
 
 def next_global_receipt_number(db: Session) -> int | None:
@@ -102,10 +129,29 @@ def shift_query():
         joinedload(CashShift.evidence_uploaded_by),
         joinedload(CashShift.closed_by),
         selectinload(CashShift.expenses),
+        selectinload(CashShift.cleaning_evidences).joinedload(ShiftCleaningEvidence.uploaded_by),
     )
 
 
 def serialize_shift(shift: CashShift, db: Session) -> dict:
+    cleaning_evidences = [
+        {
+            "id": evidence.id,
+            "original_name": evidence.original_name,
+            "uploaded_at": evidence.uploaded_at,
+            "uploaded_by_name": evidence.uploaded_by.full_name if evidence.uploaded_by else None,
+            "url": f"/api/shifts/{shift.id}/cleaning-evidence/{evidence.id}",
+        }
+        for evidence in sorted(shift.cleaning_evidences, key=lambda row: (row.uploaded_at, row.id))
+    ]
+    if shift.evidence_file_name:
+        cleaning_evidences.insert(0, {
+            "id": None,
+            "original_name": shift.evidence_original_name or "Evidencia anterior",
+            "uploaded_at": shift.evidence_uploaded_at,
+            "uploaded_by_name": shift.evidence_uploaded_by.full_name if shift.evidence_uploaded_by else None,
+            "url": f"/api/shifts/{shift.id}/evidence",
+        })
     return {
         "id": shift.id,
         "business_date": shift.business_date,
@@ -130,6 +176,7 @@ def serialize_shift(shift: CashShift, db: Session) -> dict:
         "evidence_uploaded_by_name": shift.evidence_uploaded_by.full_name if shift.evidence_uploaded_by else None,
         "closed_by_name": shift.closed_by.full_name if shift.closed_by else None,
         "evidence_url": f"/api/shifts/{shift.id}/evidence" if shift.evidence_file_name else None,
+        "cleaning_evidences": cleaning_evidences,
         "next_receipt_number": next_receipt_number(db, shift),
         "barbers": [{"id": row.barber.id, "name": row.barber.name} for row in shift.barbers],
         "expenses": [
@@ -266,37 +313,43 @@ def add_expense(shift_id: int, payload: ShiftExpenseCreate, db: DatabaseSession)
 @router.post("/{shift_id}/evidence", response_model=CashShiftRead)
 def upload_shift_evidence(
     shift_id: int,
-    evidence: Annotated[UploadFile, File(...)],
+    evidence: Annotated[list[UploadFile], File(...)],
     request: Request,
     db: DatabaseSession,
 ):
     shift = db.get(CashShift, shift_id)
     if shift is None or shift.status != "OPEN":
         raise HTTPException(status_code=400, detail="El turno no está abierto")
-    extension = ALLOWED_EVIDENCE_TYPES.get(evidence.content_type or "")
-    if extension is None:
-        raise HTTPException(status_code=400, detail="Selecciona una imagen JPG, PNG o WEBP")
-
-    content = evidence.file.read(MAX_EVIDENCE_BYTES + 1)
-    if not content:
-        raise HTTPException(status_code=400, detail="La imagen está vacía")
-    if len(content) > MAX_EVIDENCE_BYTES:
-        raise HTTPException(status_code=413, detail="La imagen no puede pesar más de 8 MB")
-
+    current_count = len(shift.cleaning_evidences) + (1 if shift.evidence_file_name else 0)
+    if not evidence:
+        raise HTTPException(status_code=400, detail="Selecciona al menos una fotografía de limpieza")
+    if current_count + len(evidence) > MAX_CLEANING_EVIDENCES:
+        raise HTTPException(status_code=400, detail="Solo se permiten hasta 5 fotografías de limpieza por turno")
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
-    previous_path = EVIDENCE_DIR / shift.evidence_file_name if shift.evidence_file_name else None
-    stored_name = f"shift_{shift.id}_{uuid4().hex}{extension}"
-    target = EVIDENCE_DIR / stored_name
-    target.write_bytes(content)
-
-    shift.evidence_file_name = stored_name
-    shift.evidence_original_name = Path(evidence.filename or "evidencia").name[:255]
-    shift.evidence_content_type = evidence.content_type
-    shift.evidence_uploaded_at = datetime.now(LOCAL_ZONE)
-    shift.evidence_uploaded_by_user_id = request.state.user.id
-    db.commit()
-    if previous_path and previous_path.is_file() and previous_path != target:
-        previous_path.unlink()
+    created_paths = []
+    try:
+        for photo in evidence:
+            content = compressed_cleaning_photo(photo)
+            stored_name = f"cleaning_shift_{shift.id}_{uuid4().hex}.webp"
+            target = EVIDENCE_DIR / stored_name
+            target.write_bytes(content)
+            created_paths.append(target)
+            db.add(ShiftCleaningEvidence(
+                shift_id=shift.id,
+                file_name=stored_name,
+                original_name=Path(photo.filename or "limpieza").name[:255],
+                content_type="image/webp",
+                uploaded_at=datetime.now(LOCAL_ZONE),
+                uploaded_by_user_id=request.state.user.id,
+            ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        for path in created_paths:
+            if path.is_file():
+                path.unlink()
+        raise
+    db.expire_all()
     saved = db.scalar(shift_query().where(CashShift.id == shift.id))
     return serialize_shift(saved, db)
 
@@ -317,22 +370,55 @@ def get_shift_evidence(shift_id: int, db: DatabaseSession):
     )
 
 
+@router.get("/{shift_id}/cleaning-evidence/{evidence_id}")
+def get_cleaning_evidence(shift_id: int, evidence_id: int, db: DatabaseSession):
+    evidence = db.scalar(select(ShiftCleaningEvidence).where(
+        ShiftCleaningEvidence.id == evidence_id,
+        ShiftCleaningEvidence.shift_id == shift_id,
+    ))
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidencia de limpieza no encontrada")
+    path = EVIDENCE_DIR / evidence.file_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No se encontró la fotografía de limpieza")
+    return FileResponse(path, media_type=evidence.content_type, filename=evidence.original_name, content_disposition_type="inline")
+
+
+@router.delete("/{shift_id}/cleaning-evidence/{evidence_id}", response_model=CashShiftRead)
+def delete_cleaning_evidence(shift_id: int, evidence_id: int, db: DatabaseSession):
+    shift = db.scalar(shift_query().where(CashShift.id == shift_id))
+    if shift is None or shift.status != "OPEN":
+        raise HTTPException(status_code=400, detail="El turno no está abierto")
+    evidence = next((row for row in shift.cleaning_evidences if row.id == evidence_id), None)
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidencia de limpieza no encontrada")
+    path = EVIDENCE_DIR / evidence.file_name
+    db.delete(evidence)
+    db.commit()
+    if path.is_file():
+        path.unlink()
+    db.expire_all()
+    saved = db.scalar(shift_query().where(CashShift.id == shift.id))
+    return serialize_shift(saved, db)
+
+
 @router.post("/{shift_id}/close", response_model=CashShiftRead)
 def close_shift(shift_id: int, payload: CashShiftClose, request: Request, db: DatabaseSession):
     shift = db.scalar(
         select(CashShift)
         .options(
             selectinload(CashShift.attendance_records)
-            .selectinload(AttendanceRecord.evidences)
+            .selectinload(AttendanceRecord.evidences),
+            selectinload(CashShift.cleaning_evidences),
         )
         .where(CashShift.id == shift_id)
     )
     if shift is None or shift.status != "OPEN":
         raise HTTPException(status_code=400, detail="El turno no está abierto")
-    if not shift.evidence_file_name:
+    if not shift.evidence_file_name and not shift.cleaning_evidences:
         raise HTTPException(
             status_code=409,
-            detail="Adjunta la evidencia del checador antes de cerrar el turno",
+            detail="Adjunta al menos una fotografía de limpieza antes de cerrar el turno",
         )
     incomplete = []
     for row in shift.attendance_records:
