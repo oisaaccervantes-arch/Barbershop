@@ -362,10 +362,15 @@ def get_shift_evidence(shift_id: int, db: DatabaseSession):
     path = EVIDENCE_DIR / shift.evidence_file_name
     if not path.is_file():
         raise HTTPException(status_code=404, detail="No se encontró el archivo de evidencia")
+    media_type = shift.evidence_content_type or "application/octet-stream"
+    original_name = shift.evidence_original_name or path.name
+    # FileResponse sends the file after this function returns. Release the SQL
+    # connection first so parallel image downloads cannot exhaust the pool.
+    db.close()
     return FileResponse(
         path,
-        media_type=shift.evidence_content_type or "application/octet-stream",
-        filename=shift.evidence_original_name or path.name,
+        media_type=media_type,
+        filename=original_name,
         content_disposition_type="inline",
     )
 
@@ -381,7 +386,10 @@ def get_cleaning_evidence(shift_id: int, evidence_id: int, db: DatabaseSession):
     path = EVIDENCE_DIR / evidence.file_name
     if not path.is_file():
         raise HTTPException(status_code=404, detail="No se encontró la fotografía de limpieza")
-    return FileResponse(path, media_type=evidence.content_type, filename=evidence.original_name, content_disposition_type="inline")
+    media_type = evidence.content_type
+    original_name = evidence.original_name
+    db.close()
+    return FileResponse(path, media_type=media_type, filename=original_name, content_disposition_type="inline")
 
 
 @router.delete("/{shift_id}/cleaning-evidence/{evidence_id}", response_model=CashShiftRead)

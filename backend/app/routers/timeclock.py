@@ -538,4 +538,6 @@ def timeclock_evidence(evidence_id: int, request: Request, db: DatabaseSession):
     path = TIMECLOCK_DIR / Path(evidence.photo_file_name).name
     if not path.is_file():
         raise HTTPException(status_code=404, detail="El archivo de evidencia no está disponible")
-    return FileResponse(path, media_type=evidence.photo_content_type, content_disposition_type="inline")
+    media_type = evidence.photo_content_type
+    db.close()
+    return FileResponse(path, media_type=media_type, content_disposition_type="inline")

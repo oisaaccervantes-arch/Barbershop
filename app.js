@@ -1180,7 +1180,7 @@ function renderShift() {
   closeShiftButton.title = hasEvidence ? "" : "Adjunta al menos una fotografía de limpieza para cerrar";
   evidencePreview.innerHTML = cleaningEvidences.length
     ? cleaningEvidences.map((photo, index) => `<article class="cleaning-evidence-card">
-        <a href="${apiFileUrl(photo.url)}" target="_blank" rel="noopener"><img src="${apiFileUrl(photo.url)}?v=${encodeURIComponent(photo.uploaded_at || "")}" alt="Evidencia de limpieza ${index + 1}"></a>
+        <a href="${apiFileUrl(photo.url)}" target="_blank" rel="noopener"><img loading="lazy" decoding="async" src="${apiFileUrl(photo.url)}?v=${encodeURIComponent(photo.uploaded_at || "")}" alt="Evidencia de limpieza ${index + 1}"></a>
         <span><strong>${escapeHtml(photo.original_name || `Foto de limpieza ${index + 1}`)}</strong><small>Adjuntada ${photo.uploaded_at ? new Date(photo.uploaded_at).toLocaleString("es-MX") : "anteriormente"}${photo.uploaded_by_name ? ` por ${escapeHtml(photo.uploaded_by_name)}` : ""}</small></span>
         ${photo.id ? `<button class="icon-button" type="button" data-delete-cleaning-evidence="${photo.id}" title="Quitar fotografía"><span class="material-symbols-outlined">delete</span></button>` : ""}
       </article>`).join("")
@@ -1344,7 +1344,7 @@ function historicalShiftDetail(shift, summary) {
         ${shift.receipt_gap_reason ? `<div class="closing-notes"><strong>Motivo de folios faltantes</strong><p>${escapeHtml(shift.receipt_gap_reason)}</p></div>` : ""}
         <div class="closing-notes"><strong>Fotos de limpieza</strong>${(shift.cleaning_evidences || []).length
           ? `<div class="cleaning-history-grid">${shift.cleaning_evidences.map((photo, index) => `<a class="evidence-history-card" href="${apiFileUrl(photo.url)}" target="_blank" rel="noopener">
-              <img src="${apiFileUrl(photo.url)}" alt="Evidencia de limpieza ${index + 1}">
+              <img loading="lazy" decoding="async" src="${apiFileUrl(photo.url)}" alt="Evidencia de limpieza ${index + 1}">
               <span><strong>${escapeHtml(photo.original_name || `Foto ${index + 1}`)}</strong><small>Adjuntada ${photo.uploaded_at ? new Date(photo.uploaded_at).toLocaleString("es-MX") : "anteriormente"}${photo.uploaded_by_name ? ` por ${escapeHtml(photo.uploaded_by_name)}` : ""}</small><em><span class="material-symbols-outlined">open_in_new</span> Abrir imagen completa</em></span>
             </a>`).join("")}</div>`
           : `<p>Este corte anterior no tiene fotos de limpieza registradas.</p>`}</div>
