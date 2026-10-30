@@ -9,6 +9,7 @@ class ServiceType(str, Enum):
     service = "SERVICE"
     package = "PACKAGE"
     extra = "EXTRA"
+    product = "PRODUCT"
 
 
 class ServiceBase(BaseModel):

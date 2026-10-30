@@ -21,7 +21,7 @@ class Service(Base):
     __table_args__ = (
         CheckConstraint("price >= 0", name="ck_services_price_nonnegative"),
         CheckConstraint(
-            "type IN ('SERVICE', 'PACKAGE', 'EXTRA')",
+            "type IN ('SERVICE', 'PACKAGE', 'EXTRA', 'PRODUCT')",
             name="ck_services_type_valid",
         ),
     )

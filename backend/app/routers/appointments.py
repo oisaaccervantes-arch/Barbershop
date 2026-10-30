@@ -108,6 +108,8 @@ def get_active_services(db: Session, service_ids: list[int]) -> list[Service]:
     ordered = [by_id[service_id] for service_id in unique_ids if service_id in by_id]
     if len(ordered) != len(unique_ids) or any(not service.active for service in ordered):
         raise HTTPException(status_code=400, detail="Uno de los servicios no está activo")
+    if any(service.type == "PRODUCT" for service in ordered):
+        raise HTTPException(status_code=400, detail="Los productos no se pueden agendar como servicios")
     return ordered
 
 

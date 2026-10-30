@@ -27,7 +27,7 @@ class PaymentCreate(BaseModel):
 
 class SaleCreate(BaseModel):
     customer_id: int | None = None
-    barber_id: int
+    barber_id: int | None = None
     appointment_id: int | None = None
     shift_id: int
     receipt_number: int = Field(ge=0, le=10_000)
@@ -79,7 +79,7 @@ class SaleRead(BaseModel):
     folio: UUID
     customer_id: int | None
     customer_name: str | None
-    barber_id: int
+    barber_id: int | None
     barber_name: str
     appointment_id: int | None
     shift_id: int | None

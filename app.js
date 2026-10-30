@@ -23,13 +23,15 @@ window.fetch = async (input, init = {}) => {
 const serviceTypeToApi = {
   Servicio: "SERVICE",
   Paquete: "PACKAGE",
-  Extra: "EXTRA"
+  Extra: "EXTRA",
+  Producto: "PRODUCT"
 };
 
 const serviceTypeFromApi = {
   SERVICE: "Servicio",
   PACKAGE: "Paquete",
-  EXTRA: "Extra"
+  EXTRA: "Extra",
+  PRODUCT: "Producto"
 };
 
 const defaultState = {
@@ -293,7 +295,7 @@ function mapSaleFromApi(sale) {
     }),
     customerId: sale.customer_id ? String(sale.customer_id) : null,
     customer: sale.customer_name || "",
-    barberId: String(sale.barber_id),
+    barberId: sale.barber_id === null ? null : String(sale.barber_id),
     barber: sale.barber_name,
     appointmentId: sale.appointment_id ? String(sale.appointment_id) : null,
     shiftId: sale.shift_id ? String(sale.shift_id) : null,
@@ -327,7 +329,8 @@ function mapSaleFromApi(sale) {
       id: String(item.service_id),
       name: item.service_name,
       price: Number(item.unit_price),
-      quantity: item.quantity
+      quantity: item.quantity,
+      type: item.service_type
     })),
     total: Number(sale.total)
   };
@@ -659,11 +662,20 @@ function currentSaleCustomer() {
 }
 
 const roundMoney = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+const isProductItem = item => item.type === "PRODUCT" || item.type === "Producto";
+const barberEligibleItems = sale => sale.items.filter(item => !isProductItem(item));
+const barberEligibleTotal = sale => roundMoney(Math.max(0,
+  barberEligibleItems(sale).reduce((sum, item) => sum + Number(item.price) * (item.quantity || 1), 0)
+  - Number(sale.discount || 0)
+));
 const getCartSubtotal = () => roundMoney(
   cart.reduce((sum, item) => sum + Number(item.price), 0)
 );
 const getBirthdayDiscount = () => {
-  return birthdayDiscountServiceId === "ALL" ? roundMoney(getCartSubtotal() / 2) : 0;
+  const eligibleSubtotal = cart
+    .filter(item => !isProductItem(item))
+    .reduce((sum, item) => sum + Number(item.price), 0);
+  return birthdayDiscountServiceId === "ALL" ? roundMoney(eligibleSubtotal / 2) : 0;
 };
 
 const userRoleLabels = {
@@ -795,14 +807,16 @@ function renderSelects() {
 function serviceSelectionSummary(selectedIds) {
   const services = selectedIds
     .map(id => state.services.find(service => service.id === String(id)))
-    .filter(Boolean);
+    .filter(service => service && service.type !== "Producto");
   if (!services.length) return "Todavía no hay servicios seleccionados.";
   const total = services.reduce((sum, service) => sum + service.price, 0);
   return `<strong>${services.map(service => escapeHtml(service.name)).join(", ")}</strong>${services.length} servicio${services.length === 1 ? "" : "s"} · ${money(total)}`;
 }
 
 function renderAppointmentServiceOptions(selectedIds = null) {
-  if (selectedIds !== null) appointmentSelectedServiceIds = selectedIds.map(String);
+  if (selectedIds !== null) appointmentSelectedServiceIds = selectedIds
+    .map(String)
+    .filter(id => state.services.find(service => service.id === id)?.type !== "Producto");
   const container = $("#appointmentServiceOptions");
   if (container) container.innerHTML = serviceSelectionSummary(appointmentSelectedServiceIds);
 }
@@ -1049,6 +1063,12 @@ function renderCustomers() {
 }
 
 function renderCart() {
+  const barberField = $("#saleBarberField");
+  const barberSelect = $("#saleForm").barber;
+  const needsBarber = cart.some(item => !isProductItem(item));
+  barberField.classList.toggle("hidden", !needsBarber);
+  barberSelect.required = needsBarber;
+  barberSelect.disabled = !needsBarber;
   const birthdayCustomer = currentSaleCustomer();
   const canUseBirthdayDiscount = Boolean(
     birthdayCustomer && isBirthdayOn(birthdayCustomer.birthDate)
@@ -1109,6 +1129,33 @@ function applyScheduledStaffToOpenShift() {
     : `No hay personal programado para el turno ${label} de hoy. Selecciónalo manualmente.`;
 }
 
+function attendanceGapsForShift() {
+  if (!currentShift) return [];
+  const weekStart = businessWeekStartIso(new Date(String(currentShift.business_date).slice(0, 10) + "T12:00:00"));
+  const eveningPeople = new Set(currentShift.shift_type === "MORNING"
+    ? workSchedules.filter(item => String(item.week_start).slice(0, 10) === weekStart
+      && item.shift_type === "EVENING" && item.status === "WORK")
+      .map(item => `${item.person_type}:${item.person_id}`)
+    : []);
+  return currentAttendance.filter(record => {
+    if (Number(record.shift_id) !== Number(currentShift.id)) return false;
+    if (["ABSENT", "REST", "PERMISSION"].includes(record.status)) return false;
+    if (!record.clock_in) return true;
+    const hasMeal = Boolean(record.scheduled_meal_start && record.scheduled_meal_end);
+    if ((record.meal_out && !record.meal_in) || (hasMeal && (!record.meal_out || !record.meal_in))) return true;
+    return !record.clock_out && !eveningPeople.has(`${record.person_type}:${record.person_id}`);
+  }).map(record => {
+    const details = [];
+    if (!record.clock_in) details.push("sin entrada");
+    else {
+      const hasMeal = Boolean(record.scheduled_meal_start && record.scheduled_meal_end);
+      if ((record.meal_out && !record.meal_in) || (hasMeal && (!record.meal_out || !record.meal_in))) details.push("checado de comida incompleto");
+      if (!record.clock_out && !eveningPeople.has(`${record.person_type}:${record.person_id}`)) details.push("sin salida");
+    }
+    return `${record.person_name} (${details.join(", ")})`;
+  });
+}
+
 function renderShift() {
   const shiftSales = state.sales
     .filter(sale => currentShift
@@ -1166,9 +1213,18 @@ function renderShift() {
     : "";
   const formReceiptGapReason = $("#closeShiftForm").receiptGapReason;
   formReceiptGapReason.required = missingReceipts.length > 0;
+  const attendanceGaps = attendanceGapsForShift();
+  const attendanceReasonField = $("#attendanceGapReasonField");
+  const attendanceReasonInput = $("#closeShiftForm").attendanceGapReason;
+  $("#attendanceGapNotice").classList.toggle("hidden", !attendanceGaps.length);
+  $("#attendanceGapNotice").textContent = attendanceGaps.length
+    ? `Falta checar: ${attendanceGaps.join(" · ")}. Escribe el motivo para cerrar; quedará en el historial.`
+    : "";
+  attendanceReasonField.classList.toggle("hidden", !attendanceGaps.length);
+  attendanceReasonInput.required = attendanceGaps.length > 0;
   evidenceStatus.textContent = hasEvidence ? `${cleaningEvidences.length} de 5` : "Pendiente";
   evidenceStatus.classList.toggle("complete", hasEvidence);
-  ["cashSalesCounted", "cardReported", "transferReported", "closingNotes", "receiptGapReason"].forEach(field => {
+  ["cashSalesCounted", "cardReported", "transferReported", "closingNotes", "receiptGapReason", "attendanceGapReason"].forEach(field => {
     $("#closeShiftForm")[field].disabled = !hasEvidence;
   });
   $("#closeShiftForm").classList.toggle("evidence-locked", !hasEvidence);
@@ -1203,14 +1259,16 @@ function renderShift() {
 
   const byBarber = new Map();
   shiftSales.forEach(sale => {
+    const eligibleItems = barberEligibleItems(sale);
+    if (sale.barberId && eligibleItems.length) {
     const row = byBarber.get(sale.barberId) || {
       name: sale.barber,
       sales: 0,
       services: 0,
       serviceCounts: new Map()
     };
-    row.sales += sale.total;
-    sale.items.forEach(item => {
+    row.sales += barberEligibleTotal(sale);
+    eligibleItems.forEach(item => {
       const quantity = item.quantity || 1;
       row.services += quantity;
       row.serviceCounts.set(
@@ -1219,6 +1277,7 @@ function renderShift() {
       );
     });
     byBarber.set(sale.barberId, row);
+    }
   });
   $("#barberProduction").innerHTML = [...byBarber.values()]
     .map(row => `
@@ -1299,19 +1358,22 @@ function historicalShiftDetail(shift, summary) {
   const barberTotals = new Map();
   const serviceTotals = new Map();
   summary.sales.forEach(sale => {
-    const barber = barberTotals.get(sale.barberId) || {
-      name: sale.barber, total: 0, services: new Map()
-    };
-    barber.total += sale.total;
+    const eligibleItems = barberEligibleItems(sale);
+    const barber = sale.barberId && eligibleItems.length
+      ? barberTotals.get(sale.barberId) || { name: sale.barber, total: 0, services: new Map() }
+      : null;
+    if (barber) barber.total += barberEligibleTotal(sale);
     sale.items.forEach(item => {
       const quantity = item.quantity || 1;
-      barber.services.set(item.name, (barber.services.get(item.name) || 0) + quantity);
+      if (barber && !isProductItem(item)) {
+        barber.services.set(item.name, (barber.services.get(item.name) || 0) + quantity);
+      }
       const service = serviceTotals.get(item.id) || { name: item.name, quantity: 0, total: 0 };
       service.quantity += quantity;
       service.total += item.price * quantity;
       serviceTotals.set(item.id, service);
     });
-    barberTotals.set(sale.barberId, barber);
+    if (barber) barberTotals.set(sale.barberId, barber);
   });
   const cashDifference = roundMoney(Number(shift.cash_counted || 0) - summary.expectedCash);
   const cardDifference = roundMoney(Number(shift.card_reported || 0) - summary.card);
@@ -1424,13 +1486,15 @@ function renderSalesCharts(sales) {
   const barberTotals = new Map();
   sales.forEach(sale => {
     dailyTotals.set(sale.date, (dailyTotals.get(sale.date) || 0) + sale.total);
+    const eligibleItems = barberEligibleItems(sale);
+    if (!sale.barberId || !eligibleItems.length) return;
     const barber = barberTotals.get(sale.barberId) || {
       name: sale.barber,
       total: 0,
       services: 0
     };
-    barber.total += sale.total;
-    barber.services += sale.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+    barber.total += barberEligibleTotal(sale);
+    barber.services += eligibleItems.reduce((sum, item) => sum + (item.quantity || 1), 0);
     barberTotals.set(sale.barberId, barber);
   });
 
@@ -2261,7 +2325,7 @@ document.addEventListener("click", async event => {
   const serviceButton = event.target.closest("[data-service]");
   if (serviceButton) {
     const service = state.services.find(item => item.id === serviceButton.dataset.service);
-    cart.push({ id: service.id, name: service.name, price: service.price });
+    cart.push({ id: service.id, name: service.name, price: service.price, type: service.type });
     renderCart();
   }
 
@@ -2593,7 +2657,7 @@ $("#closeAppointmentConfirmationModal").addEventListener("click", closeAppointme
 $("#cancelAppointmentConfirmationModal").addEventListener("click", closeAppointmentConfirmationModal);
 
 function renderServicePicker() {
-  $("#servicePickerGrid").innerHTML = state.services.map(service => `
+  $("#servicePickerGrid").innerHTML = state.services.filter(service => service.type !== "Producto").map(service => `
     <button class="service-picker-card ${servicePickerDraftIds.has(service.id) ? "selected" : ""}"
       type="button" data-picker-service="${service.id}">
       <strong>${escapeHtml(service.name)}</strong>
@@ -3200,7 +3264,8 @@ $("#shiftEvidenceForm").addEventListener("submit", async event => {
     cashSalesCounted: closeForm.cashSalesCounted.value,
     cardReported: closeForm.cardReported.value,
     transferReported: closeForm.transferReported.value,
-    closingNotes: closeForm.closingNotes.value
+    closingNotes: closeForm.closingNotes.value,
+    attendanceGapReason: closeForm.attendanceGapReason.value
   };
   const previousScrollPosition = window.scrollY;
   const files = [...form.evidence.files];
@@ -3225,6 +3290,7 @@ $("#shiftEvidenceForm").addEventListener("submit", async event => {
     closeForm.cardReported.value = closeDraft.cardReported;
     closeForm.transferReported.value = closeDraft.transferReported;
     closeForm.closingNotes.value = closeDraft.closingNotes;
+    closeForm.attendanceGapReason.value = closeDraft.attendanceGapReason;
     renderShift();
     switchView("shift");
     window.scrollTo({ top: previousScrollPosition, behavior: "instant" });
@@ -3254,6 +3320,13 @@ $("#closeShiftForm").addEventListener("submit", async event => {
     form.receiptGapReason.focus();
     return;
   }
+  const attendanceGaps = attendanceGapsForShift();
+  const attendanceGapReason = form.attendanceGapReason.value.trim();
+  if (attendanceGaps.length && attendanceGapReason.length < 3) {
+    showToast("Escribe el motivo de los checados faltantes");
+    form.attendanceGapReason.focus();
+    return;
+  }
   const fundReserved = Number(currentShift.opening_cash || 0);
   const cashSalesCounted = Number(form.cashSalesCounted.value || 0);
   pendingCloseShiftData = {
@@ -3261,7 +3334,8 @@ $("#closeShiftForm").addEventListener("submit", async event => {
     card_reported: Number(form.cardReported.value || 0),
     transfer_reported: Number(form.transferReported.value || 0),
     closing_notes: form.closingNotes.value.trim() || null,
-    receipt_gap_reason: receiptGapReason || null
+    receipt_gap_reason: receiptGapReason || null,
+    attendance_gap_reason: attendanceGaps.length ? attendanceGapReason : null
   };
   $("#closeShiftConfirmationSummary").innerHTML = `
     <div class="cut-line"><span>Turno</span><strong>${currentShift.shift_type === "MORNING" ? "Matutino" : "Vespertino"}</strong></div>
@@ -3273,6 +3347,7 @@ $("#closeShiftForm").addEventListener("submit", async event => {
     <div class="cut-line total"><span>Resultado</span><strong>${$("#reconciliationResult strong").textContent}</strong></div>
     <div class="closing-notes"><strong>Notas</strong><p>${escapeHtml(pendingCloseShiftData.closing_notes || "Sin notas")}</p></div>
     ${(currentShift.missing_receipt_numbers || []).length ? `<div class="closing-notes"><strong>Folios faltantes</strong><p>${currentShift.missing_receipt_numbers.map(number => String(number).padStart(4, "0")).join(", ")}</p><strong>Motivo</strong><p>${escapeHtml(pendingCloseShiftData.receipt_gap_reason || "Sin motivo")}</p></div>` : ""}
+    ${attendanceGaps.length ? `<div class="closing-notes"><strong>Checados faltantes</strong><p>${attendanceGaps.join(" · ")}</p><strong>Motivo</strong><p>${escapeHtml(pendingCloseShiftData.attendance_gap_reason || "Sin motivo")}</p></div>` : ""}
   `;
   $("#closeShiftModal").classList.remove("hidden");
 });
@@ -3579,7 +3654,7 @@ $("#saleForm").addEventListener("submit", async event => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         customer_id: customer ? Number(customer.id) : null,
-        barber_id: Number(form.barber.value),
+        barber_id: form.barber.value ? Number(form.barber.value) : null,
         appointment_id: pendingAppointmentId ? Number(pendingAppointmentId) : null,
         shift_id: Number(currentShift.id),
         receipt_number: Number(form.receiptNumber.value),

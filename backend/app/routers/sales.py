@@ -29,6 +29,18 @@ DatabaseSession = Annotated[Session, Depends(get_db)]
 MONEY_UNIT = Decimal("0.01")
 
 
+def barber_service_items(items):
+    """Devuelve solo los conceptos que representan trabajo de un barbero."""
+    return [item for item in items if item.service_type != "PRODUCT"]
+
+
+def barber_eligible_subtotal(items) -> Decimal:
+    return sum(
+        (item.line_total for item in barber_service_items(items)),
+        start=Decimal("0"),
+    )
+
+
 def serialize_sale(sale: Sale) -> dict:
     return {
         "id": sale.id,
@@ -36,7 +48,7 @@ def serialize_sale(sale: Sale) -> dict:
         "customer_id": sale.customer_id,
         "customer_name": sale.customer.name if sale.customer else None,
         "barber_id": sale.barber_id,
-        "barber_name": sale.barber.name,
+        "barber_name": sale.barber.name if sale.barber else "Venta de productos",
         "appointment_id": sale.appointment_id,
         "shift_id": sale.shift_id,
         "receipt_number": sale.receipt_number,
@@ -189,7 +201,7 @@ def correct_receipt_number(
 @router.post("", response_model=SaleRead, status_code=status.HTTP_201_CREATED)
 def create_sale(payload: SaleCreate, db: DatabaseSession):
     customer = db.get(Customer, payload.customer_id) if payload.customer_id else None
-    barber = db.get(Barber, payload.barber_id)
+    barber = db.get(Barber, payload.barber_id) if payload.barber_id is not None else None
     appointment = (
         db.get(Appointment, payload.appointment_id)
         if payload.appointment_id
@@ -198,14 +210,6 @@ def create_sale(payload: SaleCreate, db: DatabaseSession):
     shift = db.get(CashShift, payload.shift_id)
     if shift is None or shift.status != "OPEN":
         raise HTTPException(status_code=400, detail="El turno no está abierto")
-    barber_in_shift = db.scalar(
-        select(ShiftBarber.id).where(
-            ShiftBarber.shift_id == shift.id,
-            ShiftBarber.barber_id == payload.barber_id,
-        )
-    )
-    if barber_in_shift is None:
-        raise HTTPException(status_code=400, detail="El barbero no está registrado en el turno")
     duplicate_receipt = db.scalar(
         select(Sale.id).where(
             Sale.shift_id == shift.id,
@@ -216,8 +220,6 @@ def create_sale(payload: SaleCreate, db: DatabaseSession):
         raise HTTPException(status_code=409, detail="Ese folio ya fue utilizado en el turno")
     if payload.customer_id and (customer is None or not customer.active):
         raise HTTPException(status_code=400, detail="El cliente no está activo")
-    if barber is None or not barber.active:
-        raise HTTPException(status_code=400, detail="El barbero no está activo")
     if payload.appointment_id and appointment is None:
         raise HTTPException(status_code=400, detail="La cita no existe")
     if appointment and appointment.status in {"COMPLETED", "CANCELLED"}:
@@ -254,16 +256,38 @@ def create_sale(payload: SaleCreate, db: DatabaseSession):
             )
         )
 
+    barber_items = barber_service_items(item_rows)
+    if barber_items and payload.barber_id is None:
+        raise HTTPException(status_code=400, detail="Selecciona el barbero que realizó el servicio")
+    if not barber_items and payload.barber_id is not None:
+        raise HTTPException(status_code=400, detail="Las ventas de productos no se asignan a un barbero")
+    if barber_items:
+        if barber is None or not barber.active:
+            raise HTTPException(status_code=400, detail="El barbero no está activo")
+        barber_in_shift = db.scalar(
+            select(ShiftBarber.id).where(
+                ShiftBarber.shift_id == shift.id,
+                ShiftBarber.barber_id == payload.barber_id,
+            )
+        )
+        if barber_in_shift is None:
+            raise HTTPException(status_code=400, detail="El barbero no está registrado en el turno")
+    if appointment and not barber_items:
+        raise HTTPException(status_code=400, detail="Una cita debe incluir un servicio asignado a un barbero")
+
     subtotal = subtotal.quantize(MONEY_UNIT)
     discount = payload.discount.quantize(MONEY_UNIT)
     discount_reason = None
     if payload.birthday_discount:
+        if not barber_items:
+            raise HTTPException(status_code=400, detail="El descuento de cumpleaños requiere un servicio")
         if customer is None or customer.birth_date is None:
             raise HTTPException(status_code=400, detail="El cliente no tiene fecha de nacimiento")
         today = datetime.now(ZoneInfo("America/Hermosillo")).date()
         if (customer.birth_date.month, customer.birth_date.day) != (today.month, today.day):
             raise HTTPException(status_code=400, detail="El cliente no cumple años hoy")
-        expected_discount = (subtotal / 2).quantize(MONEY_UNIT, rounding=ROUND_HALF_UP)
+        eligible_subtotal = barber_eligible_subtotal(barber_items)
+        expected_discount = (eligible_subtotal / 2).quantize(MONEY_UNIT, rounding=ROUND_HALF_UP)
         if discount != expected_discount:
             raise HTTPException(status_code=400, detail="El descuento de cumpleaños no es válido")
         discount_reason = "BIRTHDAY"
@@ -274,7 +298,7 @@ def create_sale(payload: SaleCreate, db: DatabaseSession):
         if (customer.birth_date.month, customer.birth_date.day) != (today.month, today.day):
             raise HTTPException(status_code=400, detail="El cliente no cumple aÃ±os hoy")
         birthday_item = next(
-            (item for item in item_rows if item.service_id == payload.birthday_service_id),
+            (item for item in barber_items if item.service_id == payload.birthday_service_id),
             None,
         )
         if birthday_item is None:
@@ -285,7 +309,8 @@ def create_sale(payload: SaleCreate, db: DatabaseSession):
         discount_reason = "BIRTHDAY"
     elif discount != 0:
         raise HTTPException(status_code=400, detail="El descuento requiere una razÃ³n vÃ¡lida")
-    if discount > subtotal:
+    eligible_subtotal = barber_eligible_subtotal(barber_items)
+    if discount > eligible_subtotal:
         raise HTTPException(status_code=400, detail="El descuento supera el subtotal")
     total = (subtotal - discount).quantize(MONEY_UNIT)
 

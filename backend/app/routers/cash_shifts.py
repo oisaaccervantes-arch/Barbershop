@@ -170,6 +170,7 @@ def serialize_shift(shift: CashShift, db: Session) -> dict:
         "transfer_reported": shift.transfer_reported,
         "closing_notes": shift.closing_notes,
         "receipt_gap_reason": shift.receipt_gap_reason,
+        "attendance_gap_reason": shift.attendance_gap_reason,
         "missing_receipt_numbers": missing_receipt_numbers(db, shift),
         "evidence_original_name": shift.evidence_original_name,
         "evidence_uploaded_at": shift.evidence_uploaded_at,
@@ -245,6 +246,26 @@ def works_evening(db: Session, row: AttendanceRecord, shift: CashShift) -> bool:
         WorkSchedule.status == "WORK",
     ))
     return evening is not None
+
+
+def incomplete_attendance(rows, shift_type: str, is_evening_worker) -> list[str]:
+    incomplete = []
+    for row in rows:
+        if row.status in {"ABSENT", "REST", "PERMISSION"}:
+            continue
+        if row.clock_in is None:
+            incomplete.append(f"{row.person_name} (sin entrada)")
+            continue
+        has_scheduled_meal = bool(row.scheduled_meal_start and row.scheduled_meal_end)
+        if row.meal_out is not None and row.meal_in is None:
+            incomplete.append(f"{row.person_name} (sin regreso de comida)")
+            continue
+        if has_scheduled_meal and (row.meal_out is None or row.meal_in is None):
+            incomplete.append(f"{row.person_name} (checado de comida incompleto)")
+            continue
+        if row.clock_out is None and not (shift_type == "MORNING" and is_evening_worker(row)):
+            incomplete.append(f"{row.person_name} (sin salida)")
+    return incomplete
 
 
 @router.get("/current", response_model=CashShiftRead | None)
@@ -428,29 +449,18 @@ def close_shift(shift_id: int, payload: CashShiftClose, request: Request, db: Da
             status_code=409,
             detail="Adjunta al menos una fotografía de limpieza antes de cerrar el turno",
         )
-    incomplete = []
-    for row in shift.attendance_records:
-        if row.status in {"ABSENT", "REST", "PERMISSION"}:
-            continue
-        if row.clock_in is None:
-            incomplete.append(row.person_name)
-            continue
-        has_scheduled_meal = bool(row.scheduled_meal_start and row.scheduled_meal_end)
-        if row.meal_out is not None and row.meal_in is None:
-            incomplete.append(f"{row.person_name} (regreso de comida)")
-            continue
-        if has_scheduled_meal and (row.meal_out is None or row.meal_in is None):
-            incomplete.append(f"{row.person_name} (comida)")
-            continue
-        if row.clock_out is None:
-            if shift.shift_type == "MORNING" and works_evening(db, row, shift):
-                row.continues_next_shift = True
-            else:
-                incomplete.append(row.person_name)
-    if incomplete:
+    def is_evening_worker(row):
+        if shift.shift_type != "MORNING" or not works_evening(db, row, shift):
+            return False
+        row.continues_next_shift = True
+        return True
+
+    incomplete = incomplete_attendance(shift.attendance_records, shift.shift_type, is_evening_worker)
+    attendance_gap_reason = " ".join(payload.attendance_gap_reason.split()) if payload.attendance_gap_reason else None
+    if incomplete and (attendance_gap_reason is None or len(attendance_gap_reason) < 3):
         raise HTTPException(
             status_code=409,
-            detail="Completa entrada y salida o registra una incidencia para: " + ", ".join(incomplete),
+            detail="Falta checar: " + ", ".join(incomplete) + ". Escribe el motivo para poder cerrar el turno",
         )
     missing_receipts = missing_receipt_numbers(db, shift)
     gap_reason = " ".join(payload.receipt_gap_reason.split()) if payload.receipt_gap_reason else None
@@ -469,6 +479,7 @@ def close_shift(shift_id: int, payload: CashShiftClose, request: Request, db: Da
     shift.transfer_reported = payload.transfer_reported
     shift.closing_notes = " ".join(payload.closing_notes.split()) if payload.closing_notes else None
     shift.receipt_gap_reason = gap_reason if missing_receipts else None
+    shift.attendance_gap_reason = attendance_gap_reason if incomplete else None
     shift.closed_by_user_id = request.state.user.id
     shift.status = "CLOSED"
     shift.closed_at = datetime.now(LOCAL_ZONE)

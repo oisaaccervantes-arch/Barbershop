@@ -40,8 +40,8 @@ class Sale(Base):
     customer_id: Mapped[int | None] = mapped_column(
         ForeignKey("customers.id", ondelete="RESTRICT")
     )
-    barber_id: Mapped[int] = mapped_column(
-        ForeignKey("barbers.id", ondelete="RESTRICT"), nullable=False
+    barber_id: Mapped[int | None] = mapped_column(
+        ForeignKey("barbers.id", ondelete="RESTRICT"), nullable=True
     )
     appointment_id: Mapped[int | None] = mapped_column(
         ForeignKey("appointments.id", ondelete="RESTRICT"), unique=True

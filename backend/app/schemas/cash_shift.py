@@ -56,6 +56,7 @@ class CashShiftClose(BaseModel):
     transfer_reported: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
     closing_notes: str | None = Field(default=None, max_length=1000)
     receipt_gap_reason: str | None = Field(default=None, max_length=500)
+    attendance_gap_reason: str | None = Field(default=None, max_length=1000)
 
 
 class CashShiftRead(BaseModel):
@@ -73,6 +74,7 @@ class CashShiftRead(BaseModel):
     transfer_reported: Decimal | None
     closing_notes: str | None
     receipt_gap_reason: str | None
+    attendance_gap_reason: str | None
     missing_receipt_numbers: list[int]
     evidence_original_name: str | None
     evidence_uploaded_at: datetime | None
