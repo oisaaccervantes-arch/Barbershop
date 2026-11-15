@@ -1,0 +1,383 @@
+from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Annotated
+from zoneinfo import ZoneInfo
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, joinedload
+
+from app.database import get_db
+from app.models.appointment import Appointment
+from app.models.barber import Barber
+from app.models.customer import Customer
+from app.models.cash_shift import CashShift, ShiftBarber
+from app.models.sale import Payment, Sale, SaleItem, SaleReceiptCorrection
+from app.models.service import Service
+from app.schemas.sale import (
+    PaymentMethod,
+    SaleCancel,
+    SaleCreate,
+    SaleRead,
+    SaleReceiptCorrectionCreate,
+)
+
+
+router = APIRouter(prefix="/api/sales", tags=["sales"])
+DatabaseSession = Annotated[Session, Depends(get_db)]
+MONEY_UNIT = Decimal("0.01")
+
+
+def barber_service_items(items):
+    """Devuelve solo los conceptos que representan trabajo de un barbero."""
+    return [item for item in items if item.service_type != "PRODUCT"]
+
+
+def barber_eligible_subtotal(items) -> Decimal:
+    return sum(
+        (item.line_total for item in barber_service_items(items)),
+        start=Decimal("0"),
+    )
+
+
+def serialize_sale(sale: Sale) -> dict:
+    return {
+        "id": sale.id,
+        "folio": sale.folio,
+        "customer_id": sale.customer_id,
+        "customer_name": sale.customer.name if sale.customer else None,
+        "barber_id": sale.barber_id,
+        "barber_name": sale.barber.name if sale.barber else "Venta de productos",
+        "appointment_id": sale.appointment_id,
+        "shift_id": sale.shift_id,
+        "receipt_number": sale.receipt_number,
+        "subtotal": sale.subtotal,
+        "discount": sale.discount,
+        "discount_reason": sale.discount_reason,
+        "total": sale.total,
+        "status": sale.status,
+        "cancellation_reason": sale.cancellation_reason,
+        "cancelled_at": sale.cancelled_at,
+        "sold_at": sale.sold_at,
+        "items": [
+            {
+                "id": item.id,
+                "service_id": item.service_id,
+                "service_name": item.service_name,
+                "service_type": item.service_type,
+                "quantity": item.quantity,
+                "unit_price": item.unit_price,
+                "line_total": item.line_total,
+            }
+            for item in sale.items
+        ],
+        "payments": [
+            {
+                "id": payment.id,
+                "method": payment.method,
+                "amount": payment.amount,
+                "tendered_amount": payment.tendered_amount,
+                "change_amount": payment.change_amount,
+            }
+            for payment in sale.payments
+        ],
+        "receipt_corrections": [
+            {
+                "id": correction.id,
+                "old_receipt_number": correction.old_receipt_number,
+                "new_receipt_number": correction.new_receipt_number,
+                "reason": correction.reason,
+                "corrected_by_name": correction.corrected_by.full_name
+                if correction.corrected_by
+                else None,
+                "corrected_at": correction.corrected_at,
+            }
+            for correction in sale.receipt_corrections
+        ],
+    }
+
+
+def sale_query():
+    return select(Sale).options(
+        joinedload(Sale.customer),
+        joinedload(Sale.barber),
+        joinedload(Sale.items),
+        joinedload(Sale.payments),
+        joinedload(Sale.receipt_corrections).joinedload(
+            SaleReceiptCorrection.corrected_by
+        ),
+    )
+
+
+@router.get("", response_model=list[SaleRead])
+def list_sales(db: DatabaseSession):
+    sales = db.scalars(sale_query().order_by(Sale.sold_at.desc(), Sale.id.desc()))
+    return [serialize_sale(sale) for sale in sales.unique().all()]
+
+
+@router.patch("/{sale_id}/cancel", response_model=SaleRead)
+def cancel_sale(sale_id: int, payload: SaleCancel, db: DatabaseSession):
+    sale = db.scalar(sale_query().where(Sale.id == sale_id))
+    if sale is None:
+        raise HTTPException(status_code=404, detail="La venta no existe")
+    if sale.status == "CANCELLED":
+        raise HTTPException(status_code=409, detail="La venta ya fue cancelada")
+    if sale.shift is None or sale.shift.status != "OPEN":
+        raise HTTPException(
+            status_code=409,
+            detail="No se puede cancelar una venta de un turno cerrado",
+        )
+    reason = " ".join(payload.reason.split())
+    if not reason:
+        raise HTTPException(status_code=400, detail="Es necesario escribir el motivo")
+
+    sale.status = "CANCELLED"
+    sale.cancellation_reason = reason
+    sale.cancelled_at = datetime.now(ZoneInfo("America/Hermosillo"))
+    db.commit()
+    saved_sale = db.scalar(sale_query().where(Sale.id == sale.id))
+    return serialize_sale(saved_sale)
+
+
+@router.patch("/{sale_id}/receipt-number", response_model=SaleRead)
+def correct_receipt_number(
+    sale_id: int,
+    payload: SaleReceiptCorrectionCreate,
+    request: Request,
+    db: DatabaseSession,
+):
+    if request.state.user.role not in {"ADMIN", "RECEPTION"}:
+        raise HTTPException(status_code=403, detail="No tienes permiso para corregir folios")
+
+    sale = db.scalar(sale_query().where(Sale.id == sale_id))
+    if sale is None:
+        raise HTTPException(status_code=404, detail="La venta no existe")
+    if sale.receipt_number is None:
+        raise HTTPException(status_code=409, detail="La venta no tiene un folio corregible")
+    if payload.receipt_number == sale.receipt_number:
+        raise HTTPException(status_code=409, detail="El folio nuevo es igual al actual")
+
+    reason = " ".join(payload.reason.split())
+    if len(reason) < 3:
+        raise HTTPException(status_code=400, detail="Escribe el motivo de la corrección")
+
+    duplicate_receipt = db.scalar(
+        select(Sale.id).where(
+            Sale.shift_id == sale.shift_id,
+            Sale.receipt_number == payload.receipt_number,
+            Sale.id != sale.id,
+        )
+    )
+    if duplicate_receipt is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Ese folio ya fue utilizado en el mismo turno",
+        )
+
+    old_receipt_number = sale.receipt_number
+    sale.receipt_number = payload.receipt_number
+    sale.receipt_corrections.append(
+        SaleReceiptCorrection(
+            old_receipt_number=old_receipt_number,
+            new_receipt_number=payload.receipt_number,
+            reason=reason,
+            corrected_by_user_id=request.state.user.id,
+        )
+    )
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Ese folio ya fue utilizado en el mismo turno",
+        ) from exc
+
+    saved_sale = db.scalar(sale_query().where(Sale.id == sale.id))
+    return serialize_sale(saved_sale)
+
+
+@router.post("", response_model=SaleRead, status_code=status.HTTP_201_CREATED)
+def create_sale(payload: SaleCreate, db: DatabaseSession):
+    customer = db.get(Customer, payload.customer_id) if payload.customer_id else None
+    barber = db.get(Barber, payload.barber_id) if payload.barber_id is not None else None
+    appointment = (
+        db.get(Appointment, payload.appointment_id)
+        if payload.appointment_id
+        else None
+    )
+    shift = db.get(CashShift, payload.shift_id)
+    if shift is None or shift.status != "OPEN":
+        raise HTTPException(status_code=400, detail="El turno no está abierto")
+    duplicate_receipt = db.scalar(
+        select(Sale.id).where(
+            Sale.shift_id == shift.id,
+            Sale.receipt_number == payload.receipt_number,
+        )
+    )
+    if duplicate_receipt:
+        raise HTTPException(status_code=409, detail="Ese folio ya fue utilizado en el turno")
+    if payload.customer_id and (customer is None or not customer.active):
+        raise HTTPException(status_code=400, detail="El cliente no está activo")
+    if payload.appointment_id and appointment is None:
+        raise HTTPException(status_code=400, detail="La cita no existe")
+    if appointment and appointment.status in {"COMPLETED", "CANCELLED"}:
+        raise HTTPException(status_code=409, detail="La cita ya tiene un estado final")
+    if appointment and appointment.barber_id is None:
+        raise HTTPException(status_code=400, detail="Asigna un barbero antes de cobrar la cita")
+    if appointment and appointment.service_id is None:
+        raise HTTPException(status_code=400, detail="Asigna un servicio antes de cobrar la cita")
+    if appointment and (
+        appointment.customer_id != payload.customer_id
+        or appointment.barber_id != payload.barber_id
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="La cita no corresponde al cliente o barbero seleccionado",
+        )
+
+    item_rows: list[SaleItem] = []
+    subtotal = Decimal("0")
+    for item_payload in payload.items:
+        service = db.get(Service, item_payload.service_id)
+        if service is None or not service.active:
+            raise HTTPException(status_code=400, detail="Un servicio no está activo")
+        line_total = (service.price * item_payload.quantity).quantize(MONEY_UNIT)
+        subtotal += line_total
+        item_rows.append(
+            SaleItem(
+                service_id=service.id,
+                service_name=service.name,
+                service_type=service.type,
+                quantity=item_payload.quantity,
+                unit_price=service.price,
+                line_total=line_total,
+            )
+        )
+
+    barber_items = barber_service_items(item_rows)
+    if barber_items and payload.barber_id is None:
+        raise HTTPException(status_code=400, detail="Selecciona el barbero que realizó el servicio")
+    if not barber_items and payload.barber_id is not None:
+        raise HTTPException(status_code=400, detail="Las ventas de productos no se asignan a un barbero")
+    if barber_items:
+        if barber is None or not barber.active:
+            raise HTTPException(status_code=400, detail="El barbero no está activo")
+        barber_in_shift = db.scalar(
+            select(ShiftBarber.id).where(
+                ShiftBarber.shift_id == shift.id,
+                ShiftBarber.barber_id == payload.barber_id,
+            )
+        )
+        if barber_in_shift is None:
+            raise HTTPException(status_code=400, detail="El barbero no está registrado en el turno")
+    if appointment and not barber_items:
+        raise HTTPException(status_code=400, detail="Una cita debe incluir un servicio asignado a un barbero")
+
+    subtotal = subtotal.quantize(MONEY_UNIT)
+    discount = payload.discount.quantize(MONEY_UNIT)
+    discount_reason = None
+    if payload.birthday_discount:
+        if not barber_items:
+            raise HTTPException(status_code=400, detail="El descuento de cumpleaños requiere un servicio")
+        if customer is None or customer.birth_date is None:
+            raise HTTPException(status_code=400, detail="El cliente no tiene fecha de nacimiento")
+        today = datetime.now(ZoneInfo("America/Hermosillo")).date()
+        if (customer.birth_date.month, customer.birth_date.day) != (today.month, today.day):
+            raise HTTPException(status_code=400, detail="El cliente no cumple años hoy")
+        eligible_subtotal = barber_eligible_subtotal(barber_items)
+        expected_discount = (eligible_subtotal / 2).quantize(MONEY_UNIT, rounding=ROUND_HALF_UP)
+        if discount != expected_discount:
+            raise HTTPException(status_code=400, detail="El descuento de cumpleaños no es válido")
+        discount_reason = "BIRTHDAY"
+    elif payload.birthday_service_id is not None:
+        if customer is None or customer.birth_date is None:
+            raise HTTPException(status_code=400, detail="El cliente no tiene fecha de nacimiento")
+        today = datetime.now(ZoneInfo("America/Hermosillo")).date()
+        if (customer.birth_date.month, customer.birth_date.day) != (today.month, today.day):
+            raise HTTPException(status_code=400, detail="El cliente no cumple aÃ±os hoy")
+        birthday_item = next(
+            (item for item in barber_items if item.service_id == payload.birthday_service_id),
+            None,
+        )
+        if birthday_item is None:
+            raise HTTPException(status_code=400, detail="El servicio del descuento no estÃ¡ en la venta")
+        expected_discount = (birthday_item.unit_price / 2).quantize(MONEY_UNIT)
+        if discount != expected_discount:
+            raise HTTPException(status_code=400, detail="El descuento de cumpleaÃ±os no es vÃ¡lido")
+        discount_reason = "BIRTHDAY"
+    elif discount != 0:
+        raise HTTPException(status_code=400, detail="El descuento requiere una razÃ³n vÃ¡lida")
+    eligible_subtotal = barber_eligible_subtotal(barber_items)
+    if discount > eligible_subtotal:
+        raise HTTPException(status_code=400, detail="El descuento supera el subtotal")
+    total = (subtotal - discount).quantize(MONEY_UNIT)
+
+    payment_methods = [payment.method for payment in payload.payments]
+    if len(payment_methods) != len(set(payment_methods)):
+        raise HTTPException(status_code=400, detail="Hay métodos de pago repetidos")
+    payment_total = sum(
+        (payment.amount for payment in payload.payments), start=Decimal("0")
+    ).quantize(MONEY_UNIT)
+    if payment_total != total:
+        raise HTTPException(
+            status_code=400,
+            detail="La suma de los pagos debe coincidir con el total",
+        )
+
+    payment_rows: list[Payment] = []
+    for payment_payload in payload.payments:
+        amount = payment_payload.amount.quantize(MONEY_UNIT)
+        tendered = payment_payload.tendered_amount
+        change = None
+        if payment_payload.method == PaymentMethod.cash:
+            tendered = (tendered or amount).quantize(MONEY_UNIT)
+            if tendered < amount:
+                raise HTTPException(
+                    status_code=400,
+                    detail="El efectivo recibido es menor al importe en efectivo",
+                )
+            change = (tendered - amount).quantize(MONEY_UNIT)
+        elif tendered is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Solo el efectivo puede incluir importe recibido",
+            )
+        payment_rows.append(
+            Payment(
+                method=payment_payload.method.value,
+                amount=amount,
+                tendered_amount=tendered,
+                change_amount=change,
+            )
+        )
+
+    sale = Sale(
+        customer_id=payload.customer_id,
+        barber_id=payload.barber_id,
+        appointment_id=payload.appointment_id,
+        shift_id=shift.id,
+        receipt_number=payload.receipt_number,
+        subtotal=subtotal,
+        discount=discount,
+        discount_reason=discount_reason,
+        total=total,
+        status="COMPLETED",
+        items=item_rows,
+        payments=payment_rows,
+    )
+    db.add(sale)
+    if appointment:
+        appointment.status = "COMPLETED"
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La cita ya fue cobrada",
+        ) from exc
+
+    saved_sale = db.scalar(sale_query().where(Sale.id == sale.id))
+    return serialize_sale(saved_sale)

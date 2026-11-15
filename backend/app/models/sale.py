@@ -1,0 +1,166 @@
+from datetime import datetime
+from decimal import Decimal
+from uuid import UUID, uuid4
+
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Uuid,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.models.base import Base
+
+
+class Sale(Base):
+    __tablename__ = "sales"
+    __table_args__ = (
+        CheckConstraint("subtotal >= 0", name="ck_sales_subtotal_nonnegative"),
+        CheckConstraint("discount >= 0", name="ck_sales_discount_nonnegative"),
+        CheckConstraint("total >= 0", name="ck_sales_total_nonnegative"),
+        CheckConstraint("receipt_number IS NULL OR (receipt_number >= 0 AND receipt_number <= 10000)", name="ck_sales_receipt_number_range"),
+        UniqueConstraint("shift_id", "receipt_number", name="uq_sales_shift_receipt_number"),
+        CheckConstraint(
+            "status IN ('COMPLETED', 'CANCELLED')",
+            name="ck_sales_status_valid",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    folio: Mapped[UUID] = mapped_column(
+        Uuid, nullable=False, unique=True, default=uuid4
+    )
+    customer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("customers.id", ondelete="RESTRICT")
+    )
+    barber_id: Mapped[int | None] = mapped_column(
+        ForeignKey("barbers.id", ondelete="RESTRICT"), nullable=True
+    )
+    appointment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("appointments.id", ondelete="RESTRICT"), unique=True
+    )
+    shift_id: Mapped[int | None] = mapped_column(ForeignKey("cash_shifts.id", ondelete="RESTRICT"))
+    receipt_number: Mapped[int | None] = mapped_column(Integer)
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    discount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), nullable=False, default=0, server_default="0"
+    )
+    discount_reason: Mapped[str | None] = mapped_column(String(30))
+    total: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="COMPLETED", server_default="COMPLETED"
+    )
+    cancellation_reason: Mapped[str | None] = mapped_column(String(500))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sold_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    customer = relationship("Customer")
+    barber = relationship("Barber")
+    appointment = relationship("Appointment")
+    shift = relationship("CashShift", back_populates="sales")
+    items = relationship(
+        "SaleItem", back_populates="sale", cascade="all, delete-orphan"
+    )
+    payments = relationship(
+        "Payment", back_populates="sale", cascade="all, delete-orphan"
+    )
+    receipt_corrections = relationship(
+        "SaleReceiptCorrection",
+        back_populates="sale",
+        cascade="all, delete-orphan",
+        order_by="SaleReceiptCorrection.corrected_at",
+    )
+
+
+class SaleReceiptCorrection(Base):
+    __tablename__ = "sale_receipt_corrections"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    sale_id: Mapped[int] = mapped_column(
+        ForeignKey("sales.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    old_receipt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    new_receipt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    corrected_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    corrected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    sale = relationship("Sale", back_populates="receipt_corrections")
+    corrected_by = relationship("User")
+
+
+class SaleItem(Base):
+    __tablename__ = "sale_items"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_sale_items_quantity_positive"),
+        CheckConstraint("unit_price >= 0", name="ck_sale_items_price_nonnegative"),
+        CheckConstraint("line_total >= 0", name="ck_sale_items_total_nonnegative"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    sale_id: Mapped[int] = mapped_column(
+        ForeignKey("sales.id", ondelete="CASCADE"), nullable=False
+    )
+    service_id: Mapped[int] = mapped_column(
+        ForeignKey("services.id", ondelete="RESTRICT"), nullable=False
+    )
+    service_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    service_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+
+    sale = relationship("Sale", back_populates="items")
+    service = relationship("Service")
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_payments_amount_positive"),
+        CheckConstraint(
+            "method IN ('CASH', 'CARD', 'TRANSFER')",
+            name="ck_payments_method_valid",
+        ),
+        CheckConstraint(
+            "tendered_amount IS NULL OR tendered_amount >= amount",
+            name="ck_payments_tendered_valid",
+        ),
+        CheckConstraint(
+            "change_amount IS NULL OR change_amount >= 0",
+            name="ck_payments_change_nonnegative",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    sale_id: Mapped[int] = mapped_column(
+        ForeignKey("sales.id", ondelete="CASCADE"), nullable=False
+    )
+    method: Mapped[str] = mapped_column(String(20), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    tendered_amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    change_amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+
+    sale = relationship("Sale", back_populates="payments")

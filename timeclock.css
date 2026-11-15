@@ -1,0 +1,46 @@
+:root { --ink:#251c16; --muted:#74685f; --paper:#fffaf1; --surface:#fff; --gold:#d7a928; --gold-dark:#8b6500; --line:#dfd5c8; --danger:#b93427; --success:#187647; }
+* { box-sizing:border-box; }
+body { background:radial-gradient(circle at top,#f4dfa0 0,#f4ead8 32%,#211a15 100%); color:var(--ink); font-family:"Work Sans",sans-serif; margin:0; min-height:100vh; }
+button,input { font:inherit; }
+button { cursor:pointer; }
+.hidden { display:none !important; }
+.sr-only { height:1px; margin:-1px; overflow:hidden; position:absolute; width:1px; clip:rect(0,0,0,0); }
+.clock-shell { display:grid; gap:18px; margin:auto; max-width:780px; min-height:100vh; padding:22px; }
+.clock-header { align-items:center; color:#fff; display:flex; justify-content:space-between; }
+.clock-brand { align-items:center; display:flex; gap:12px; }
+.clock-brand > span { align-items:center; background:var(--gold); border-radius:14px; color:var(--ink); display:flex; font-size:32px; height:54px; justify-content:center; width:54px; }
+.clock-brand strong,.clock-brand small,.clock-now strong,.clock-now small { display:block; }
+.clock-brand strong { font:800 1.25rem Manrope,sans-serif; }
+.clock-brand small,.clock-now small { opacity:.75; }
+.clock-now { text-align:right; }
+.clock-now strong { font:800 1.7rem Manrope,sans-serif; }
+.clock-card,.camera-card { align-self:center; background:rgba(255,250,241,.98); border:1px solid rgba(255,255,255,.55); border-radius:26px; box-shadow:0 26px 80px rgba(0,0,0,.28); padding:clamp(24px,5vw,48px); text-align:center; }
+.clock-card h1,.camera-card h1 { font:800 clamp(1.8rem,5vw,3rem) Manrope,sans-serif; margin:5px 0 10px; }
+.eyebrow { color:var(--gold-dark); font-size:.78rem; font-weight:800; letter-spacing:.15em; margin:0; text-transform:uppercase; }
+.muted,.camera-copy p { color:var(--muted); }
+#pinInput { left:-9999px; position:absolute; }
+.pin-dots { display:flex; gap:12px; justify-content:center; margin:24px 0; min-height:18px; }
+.pin-dots span { background:#d2c7b8; border-radius:50%; height:15px; width:15px; }
+.pin-dots span.filled { background:var(--ink); transform:scale(1.12); }
+.keypad { display:grid; gap:10px; grid-template-columns:repeat(3,1fr); margin:auto; max-width:390px; }
+.keypad button { background:#fff; border:1px solid var(--line); border-radius:15px; color:var(--ink); font:800 1.4rem Manrope,sans-serif; min-height:66px; }
+.keypad button:active { background:#f1dfae; transform:scale(.97); }
+.keypad .keypad-confirm { background:var(--ink); color:#fff; }
+.clock-error { background:#ffe3de; border-radius:10px; color:var(--danger); font-weight:700; margin:18px auto 0; padding:12px; }
+.action-options { display:grid; gap:12px; margin:28px 0 18px; }
+.action-button,.primary-action,.secondary-action { border:0; border-radius:13px; font-weight:800; min-height:54px; padding:14px 20px; }
+.action-button,.primary-action { background:var(--ink); color:#fff; }
+.action-button { align-items:center; display:flex; font-size:1.05rem; gap:12px; justify-content:center; }
+.action-button.meal { background:#9b6f00; }
+.secondary-action { background:#eee5d9; color:var(--ink); }
+.camera-card { padding:24px; }
+.camera-frame { background:#111; border-radius:20px; margin:20px auto; max-width:640px; overflow:hidden; position:relative; }
+.camera-frame video,.camera-frame img { display:block; height:min(52vh,480px); object-fit:cover; transform:scaleX(-1); width:100%; }
+.camera-guide { border:3px solid rgba(255,255,255,.78); border-radius:50%; height:72%; left:50%; position:absolute; top:50%; transform:translate(-50%,-50%); width:min(56%,300px); }
+.camera-actions { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; }
+.success-icon { color:var(--success); font-size:86px; }
+.success-card p { color:var(--muted); font-size:1.05rem; }
+.incident-warning { background:#fff0bd; border-radius:10px; color:#715200 !important; font-weight:700; padding:12px; }
+footer { align-items:center; color:#fff; display:flex; font-size:.82rem; gap:20px; justify-content:space-between; }
+footer a { color:#fff; font-weight:800; }
+@media (max-width:600px) { .clock-shell{padding:12px}.clock-brand small,footer span{display:none}.clock-now strong{font-size:1.25rem}.clock-card{padding:24px 18px}.keypad button{min-height:58px}.camera-card{padding:18px 12px}.camera-frame video,.camera-frame img{height:48vh} }

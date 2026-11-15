@@ -1,0 +1,11 @@
+.git
+.gitignore
+.idea
+.vscode
+backend/.env
+backend/.venv
+backend/uploads
+__pycache__
+*.pyc
+*.tar.gz
+docs

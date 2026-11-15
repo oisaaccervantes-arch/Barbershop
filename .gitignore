@@ -1,0 +1,8 @@
+backend/.venv/
+backend/.env
+backend/uploads/
+__pycache__/
+*.pyc
+.env
+*.tar.gz
+backend/local_legacy_schedules_backup.json

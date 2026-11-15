@@ -1,0 +1,143 @@
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+
+from app.database import engine
+from app.database import SessionLocal
+from app.models.user import User
+from app.security import COOKIE_NAME, decode_session_token
+from app.routers.auth import router as auth_router
+from app.routers.appointments import router as appointments_router
+from app.routers.barbers import router as barbers_router
+from app.routers.customers import router as customers_router
+from app.routers.cash_shifts import router as cash_shifts_router
+from app.routers.sales import router as sales_router
+from app.routers.services import router as services_router
+from app.routers.receptionists import router as receptionists_router
+from app.routers.attendance import router as attendance_router
+from app.routers.users import router as users_router
+from app.routers.timeclock import router as timeclock_router
+from pathlib import Path
+from types import SimpleNamespace
+
+
+app = FastAPI(
+    title="Bizantino POS API",
+    version="0.1.0",
+)
+
+FRONTEND_DIR = Path(__file__).resolve().parents[2]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(appointments_router)
+app.include_router(barbers_router)
+app.include_router(customers_router)
+app.include_router(cash_shifts_router)
+app.include_router(sales_router)
+app.include_router(services_router)
+app.include_router(receptionists_router)
+app.include_router(auth_router)
+app.include_router(attendance_router)
+app.include_router(users_router)
+app.include_router(timeclock_router)
+
+
+PUBLIC_API_PATHS = {
+    "/api/auth/login",
+    "/api/health",
+    "/api/health/database",
+    "/api/timeclock/status",
+    "/api/timeclock/punch",
+}
+
+
+@app.middleware("http")
+async def require_authenticated_session(request: Request, call_next):
+    if request.method == "OPTIONS" or not request.url.path.startswith("/api/") or request.url.path in PUBLIC_API_PATHS:
+        return await call_next(request)
+    user_id = decode_session_token(request.cookies.get(COOKIE_NAME, ""))
+    if user_id is None:
+        return JSONResponse(status_code=401, content={"detail": "Sesión requerida"})
+    with SessionLocal() as db:
+        user = db.get(User, user_id)
+        if user is None or not user.active:
+            return JSONResponse(status_code=401, content={"detail": "Sesión inválida"})
+        authenticated_user = SimpleNamespace(
+            id=user.id,
+            username=user.username,
+            full_name=user.full_name,
+            role=user.role,
+            active=user.active,
+        )
+
+    # La consulta de autenticación ya terminó y su conexión se devuelve al pool
+    # antes de que el endpoint abra su propia sesión de base de datos.
+    request.state.user = authenticated_user
+    if (
+        authenticated_user.role == "SUPPORT"
+        and request.method not in {"GET", "HEAD", "OPTIONS"}
+        and request.url.path != "/api/auth/logout"
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "La cuenta de soporte tiene acceso de consulta únicamente"},
+        )
+    return await call_next(request)
+
+
+@app.get("/")
+def root():
+    return FileResponse(FRONTEND_DIR / "index.html")
+
+
+@app.get("/app.js", include_in_schema=False)
+def frontend_javascript():
+    return FileResponse(FRONTEND_DIR / "app.js", media_type="application/javascript")
+
+
+@app.get("/styles.css", include_in_schema=False)
+def frontend_styles():
+    return FileResponse(FRONTEND_DIR / "styles.css", media_type="text/css")
+
+
+@app.get("/checador", include_in_schema=False)
+@app.get("/checador/", include_in_schema=False)
+def timeclock_frontend():
+    return FileResponse(FRONTEND_DIR / "timeclock.html")
+
+
+@app.get("/timeclock.js", include_in_schema=False)
+def timeclock_javascript():
+    return FileResponse(FRONTEND_DIR / "timeclock.js", media_type="application/javascript")
+
+
+@app.get("/timeclock.css", include_in_schema=False)
+def timeclock_styles():
+    return FileResponse(FRONTEND_DIR / "timeclock.css", media_type="text/css")
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/api/health/database")
+def database_health():
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No fue posible conectar con PostgreSQL",
+        ) from exc
+
+    return {"status": "ok", "database": "connected"}
